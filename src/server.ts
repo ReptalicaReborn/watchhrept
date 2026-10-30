@@ -5,11 +5,13 @@ import { fileURLToPath } from "node:url";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { Config } from "./config.js";
-import type { ZaloSession } from "./session.js";
-import type { ThreadKind } from "./store.js";
+import { HttpError } from "./errors.js";
+import type { MuteOption, ZaloSession } from "./session.js";
+import { REACTIONS, type MentionInfo, type ThreadKind } from "./store.js";
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
 const MAX_TEXT_LENGTH = 4000;
+const MUTE_OPTIONS = new Set<MuteOption>(["1h", "4h", "8am", "forever"]);
 
 export function createServer(config: Config, session: ZaloSession): http.Server {
     const app = express();
@@ -45,9 +47,62 @@ export function createServer(config: Config, session: ZaloSession): http.Server 
         res.status(202).json(session.getStatus());
     });
 
+    api.get("/reactions", (_req, res) => {
+        res.json(Object.entries(REACTIONS).map(([key, r]) => ({ key, emoji: r.emoji })));
+    });
+
+    // ---- Conversations ----
+
     api.get("/threads", (_req, res) => {
         res.json(session.store.listThreads());
     });
+
+    api.get("/threads/:kind/:id/info", wrap(async (req, res) => {
+        const kind = parseKind(req.params.kind);
+        const { id } = req.params;
+        if (kind === "user") {
+            res.json({ lastOnline: await session.lastOnline(id).catch(() => null) });
+        } else {
+            res.json({ members: await session.groupMembers(id) });
+        }
+    }));
+
+    api.post("/threads/:kind/:id/read", wrap(async (req, res) => {
+        await session.markRead(parseKind(req.params.kind), req.params.id);
+        res.status(204).end();
+    }));
+
+    api.post("/threads/:kind/:id/unread", wrap(async (req, res) => {
+        await session.markUnread(parseKind(req.params.kind), req.params.id);
+        res.status(204).end();
+    }));
+
+    api.put("/threads/:kind/:id/pin", wrap(async (req, res) => {
+        if (typeof req.body?.pinned !== "boolean") throw new HttpError(400, "pinned must be a boolean");
+        await session.setPinned(parseKind(req.params.kind), req.params.id, req.body.pinned);
+        res.status(204).end();
+    }));
+
+    api.put("/threads/:kind/:id/mute", wrap(async (req, res) => {
+        const option = req.body?.duration ?? null;
+        if (option !== null && !MUTE_OPTIONS.has(option)) {
+            throw new HttpError(400, `duration must be one of ${[...MUTE_OPTIONS].join(", ")} or null`);
+        }
+        await session.setMuted(parseKind(req.params.kind), req.params.id, option);
+        res.status(204).end();
+    }));
+
+    api.post("/threads/:kind/:id/typing", wrap(async (req, res) => {
+        await session.sendTyping(parseKind(req.params.kind), req.params.id);
+        res.status(204).end();
+    }));
+
+    api.delete("/threads/:kind/:id", wrap(async (req, res) => {
+        await session.deleteConversation(parseKind(req.params.kind), req.params.id);
+        res.status(204).end();
+    }));
+
+    // ---- Messages ----
 
     api.get("/threads/:kind/:id/messages", wrap(async (req, res) => {
         const kind = parseKind(req.params.kind);
@@ -70,15 +125,41 @@ export function createServer(config: Config, session: ZaloSession): http.Server 
         const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
         if (!text) throw new HttpError(400, "text is required");
         if (text.length > MAX_TEXT_LENGTH) throw new HttpError(400, `text is longer than ${MAX_TEXT_LENGTH} characters`);
+        const quoteId = req.body?.quoteId === undefined ? undefined : String(req.body.quoteId);
+        const mentions = parseMentions(req.body?.mentions, text);
 
-        const msgId = await session.sendText(kind, req.params.id, text);
+        const msgId = await session.sendText(kind, req.params.id, text, { quoteId, mentions });
         res.status(201).json({ msgId });
     }));
 
-    api.post("/threads/:kind/:id/read", (req, res) => {
-        session.store.markRead(parseKind(req.params.kind), req.params.id);
+    api.put("/threads/:kind/:id/messages/:msgId/reaction", wrap(async (req, res) => {
+        const reaction = req.body?.reaction ?? null;
+        if (reaction !== null && typeof reaction !== "string") throw new HttpError(400, "reaction must be a string or null");
+        await session.react(parseKind(req.params.kind), req.params.id, req.params.msgId, reaction);
         res.status(204).end();
-    });
+    }));
+
+    api.post("/threads/:kind/:id/messages/:msgId/recall", wrap(async (req, res) => {
+        await session.recall(parseKind(req.params.kind), req.params.id, req.params.msgId);
+        res.status(204).end();
+    }));
+
+    api.delete("/threads/:kind/:id/messages/:msgId", wrap(async (req, res) => {
+        await session.deleteForMe(parseKind(req.params.kind), req.params.id, req.params.msgId);
+        res.status(204).end();
+    }));
+
+    api.post("/threads/:kind/:id/messages/:msgId/forward", wrap(async (req, res) => {
+        const targets = req.body?.to;
+        if (!Array.isArray(targets) || targets.length === 0) throw new HttpError(400, "to must be a non-empty array");
+        const parsed = targets.map((t: unknown) => {
+            const { kind, id } = (t ?? {}) as { kind?: unknown; id?: unknown };
+            if (typeof id !== "string" || !id) throw new HttpError(400, "each target needs an id");
+            return { kind: parseKind(String(kind)), id };
+        });
+        await session.forward(parseKind(req.params.kind), req.params.id, req.params.msgId, parsed);
+        res.status(204).end();
+    }));
 
     app.use("/api", api);
     app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
@@ -93,7 +174,7 @@ export function createServer(config: Config, session: ZaloSession): http.Server 
     return server;
 }
 
-/** Pushes session status, new messages and thread-list changes to connected clients. */
+/** Pushes session status, message changes, typing and thread-list changes to connected clients. */
 function attachWebSocket(server: http.Server, config: Config, session: ZaloSession): void {
     const wss = new WebSocketServer({ noServer: true });
 
@@ -116,6 +197,9 @@ function attachWebSocket(server: http.Server, config: Config, session: ZaloSessi
 
     session.on("status", (status) => broadcast({ type: "status", status }));
     session.on("message", (message) => broadcast({ type: "message", message }));
+    session.on("message_updated", (message) => broadcast({ type: "message_updated", message }));
+    session.on("message_deleted", (deleted) => broadcast({ type: "message_deleted", ...deleted }));
+    session.on("typing", (typing) => broadcast({ type: "typing", ...typing }));
     session.on("threads", () => broadcast({ type: "threads" }));
 
     wss.on("connection", (ws: WebSocket) => {
@@ -143,11 +227,17 @@ function parseKind(kind: string): ThreadKind {
     throw new HttpError(400, `Unknown thread kind: ${kind}`);
 }
 
-class HttpError extends Error {
-    constructor(
-        readonly status: number,
-        message: string,
-    ) {
-        super(message);
-    }
+export function parseMentions(input: unknown, text: string): MentionInfo[] | undefined {
+    if (input === undefined || input === null) return undefined;
+    if (!Array.isArray(input)) throw new HttpError(400, "mentions must be an array");
+    return input.map((m: unknown) => {
+        const { uid, pos, len } = (m ?? {}) as Record<string, unknown>;
+        if (typeof uid !== "string" || !Number.isInteger(pos) || !Number.isInteger(len)) {
+            throw new HttpError(400, "each mention needs uid, pos and len");
+        }
+        const p = pos as number;
+        const l = len as number;
+        if (p < 0 || l <= 0 || p + l > text.length) throw new HttpError(400, "mention is outside the text");
+        return { uid, pos: p, len: l };
+    });
 }

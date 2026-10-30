@@ -6,7 +6,7 @@ import { ChatStore } from "./store.js";
 
 const config = loadConfig();
 const store = new ChatStore(path.join(config.dataDir, "messages.json"));
-const session = new ZaloSession(store, config.dataDir);
+const session = new ZaloSession(store, config.dataDir, config.readReceipts);
 const server = createServer(config, session);
 
 server.listen(config.port, config.host, () => {

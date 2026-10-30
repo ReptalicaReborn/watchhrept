@@ -6,6 +6,8 @@ export type Config = {
     dataDir: string;
     /** If set, every API/WebSocket request must present this token. */
     accessToken: string | null;
+    /** Send "seen" receipts to Zalo when a chat is read, like the official app. */
+    readReceipts: boolean;
 };
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -29,5 +31,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         port,
         dataDir: path.resolve(env.DATA_DIR ?? "data"),
         accessToken,
+        readReceipts: env.READ_RECEIPTS !== "false",
     };
 }
