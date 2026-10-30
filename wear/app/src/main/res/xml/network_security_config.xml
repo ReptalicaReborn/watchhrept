@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The server is self-hosted and often reached by LAN IP over plain HTTP,
+  so cleartext is allowed. Prefer HTTPS (reverse proxy, Tailscale) whenever
+  the watch talks to it outside your home network.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

@@ -57,6 +57,30 @@ leaves your home network: anyone with the token can read and send messages as yo
 HOST=0.0.0.0 ACCESS_TOKEN=$(openssl rand -hex 24) npm start
 ```
 
+## Wear OS app
+
+`wear/` is a standalone Wear OS 3+ app (Kotlin, Compose for Wear OS) that talks to this server.
+
+- **Chat list** with unread counts, **chat view** with the latest messages, live updates over the WebSocket.
+- **Reply** by voice, keyboard, emoji, quick replies, or typing on the paired phone (the system Wear input screen).
+- **Log in from the watch**: if the server isn't logged in yet, the watch shows the Zalo QR code; scan it with
+  the Zalo app on your phone.
+- The WebSocket is only open while the app is on screen, to save battery. For notifications while it's closed,
+  keep relying on the normal Zalo phone app notifications that the watch mirrors.
+
+### Install
+
+1. Run the server so the watch can reach it, with a token, e.g.
+   `HOST=0.0.0.0 ACCESS_TOKEN=$(openssl rand -hex 24) npm start`.
+2. Get the APK: download `zalo-watch-debug-apk` from the latest **CI** run on GitHub, or build it with
+   `cd wear && ./gradlew assembleDebug` (Android Studio / Android SDK required).
+3. Enable *Developer options → ADB debugging* (and *Debug over Wi-Fi*) on the watch, then
+   `adb connect <watch-ip>:5555 && adb install app-debug.apk`.
+4. Open **Zalo Watch**, set the server address (e.g. `http://192.168.1.10:3000`) and the access token.
+   In the input screen pick *type on phone* to paste the token from your phone.
+
+The Wear OS emulator reaches a server on your computer at `http://10.0.2.2:3000`.
+
 ## Security notes
 
 - `data/credentials.json` is equivalent to your logged-in Zalo session. It is written with `0600` permissions
