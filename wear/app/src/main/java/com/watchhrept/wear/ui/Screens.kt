@@ -7,6 +7,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -43,7 +44,6 @@ import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
 import androidx.wear.compose.material.Vignette
 import androidx.wear.compose.material.VignettePosition
-import com.watchhrept.wear.data.ApiClient
 import com.watchhrept.wear.data.ServerSettings
 import com.watchhrept.wear.data.SessionStatus
 import kotlinx.coroutines.delay
@@ -126,9 +126,16 @@ fun ConfirmChip(label: String, onConfirm: () -> Unit) {
 }
 
 @Composable
-fun LoadingScreen() {
+fun LoadingScreen(label: String? = null) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
+        if (label == null) {
+            CircularProgressIndicator()
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                CircularProgressIndicator()
+                CenteredText(label, MaterialTheme.colors.onSurfaceVariant)
+            }
+        }
     }
 }
 
@@ -177,41 +184,68 @@ fun LoginScreen(status: SessionStatus, onLogin: () -> Unit, onSettings: () -> Un
 }
 
 @Composable
-fun SettingsScreen(current: ServerSettings, onSave: (ServerSettings) -> Unit) {
+fun SettingsScreen(
+    current: ServerSettings,
+    loggedIn: Boolean,
+    onSave: (ServerSettings) -> Unit,
+    onRestartServer: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    var onWatch by rememberSaveable { mutableStateOf(current.onWatch) }
     var serverUrl by rememberSaveable { mutableStateOf(current.serverUrl) }
     var token by rememberSaveable { mutableStateOf(current.token) }
     val editUrl = rememberTextInput { serverUrl = it.trim() }
     val editToken = rememberTextInput { token = it.trim() }
-    val valid = ApiClient.normalizeServerUrl(serverUrl) != null
+    val edited = ServerSettings(onWatch, serverUrl, token)
+    val changed = edited != current
 
     WatchList {
-        item { ListHeader { Text("Server") } }
+        item { ListHeader { Text("Settings") } }
         item {
             ActionChip(
-                label = "Address",
-                secondary = serverUrl.ifBlank { "Not set" },
-                onClick = { editUrl("Server address", listOf("http://10.0.2.2:3000")) },
+                label = "Zalo runs on",
+                secondary = if (onWatch) "This watch" else "Another device",
+                onClick = { onWatch = !onWatch },
             )
         }
-        item {
-            ActionChip(
-                label = "Access token",
-                secondary = if (token.isBlank()) "None" else "•".repeat(8),
-                onClick = { editToken("Access token", emptyList()) },
-            )
+        if (!onWatch) {
+            item {
+                ActionChip(
+                    label = "Address",
+                    secondary = serverUrl.ifBlank { "Not set" },
+                    onClick = { editUrl("Server address", listOf("http://10.0.2.2:3000")) },
+                )
+            }
+            item {
+                ActionChip(
+                    label = "Access token",
+                    secondary = if (token.isBlank()) "None" else "•".repeat(8),
+                    onClick = { editToken("Access token", emptyList()) },
+                )
+            }
         }
-        item {
-            ActionChip(
-                label = "Save",
-                enabled = valid,
-                onClick = { onSave(ServerSettings(serverUrl, token)) },
-                colors = ChipDefaults.primaryChipColors(),
-            )
+        if (changed || !current.isConfigured) {
+            item {
+                ActionChip(
+                    label = "Save",
+                    enabled = edited.isConfigured,
+                    onClick = { onSave(edited) },
+                    colors = ChipDefaults.primaryChipColors(),
+                )
+            }
+        } else {
+            if (current.onWatch) item { ActionChip("Restart Zalo service", onRestartServer) }
+            if (loggedIn) item { ConfirmChip("Log out of Zalo", onLogout) }
         }
         item {
             CenteredText(
-                "Tip: choose “type on phone” in the input screen to paste the token.",
+                if (onWatch) {
+                    "Zalo stays connected on the watch, even with the app closed. Uses more battery."
+                } else {
+                    "Tip: choose “type on phone” in the input screen to paste the token."
+                },
                 MaterialTheme.colors.onSurfaceVariant,
+                MaterialTheme.typography.caption3,
             )
         }
     }

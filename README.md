@@ -60,8 +60,12 @@ HOST=0.0.0.0 ACCESS_TOKEN=$(openssl rand -hex 24) npm start
 
 ## Wear OS app
 
-`wear/` is a standalone Wear OS 3+ app (Kotlin, Compose for Wear OS) that talks to this server. It covers
-everything the official app does for text chat (no mini apps, stickers, media or calls):
+`wear/` is a standalone Wear OS 3+ app (Kotlin, Compose for Wear OS). By default it **runs the Zalo server on
+the watch itself** (the same code as above, bundled into the app with an embedded Node.js from
+[nodejs-mobile](https://github.com/nodejs-mobile/nodejs-mobile)), so no computer is needed. It can also connect to
+a server running elsewhere (*Settings → Zalo runs on → Another device*).
+
+It covers everything the official app does for text chat (no mini apps, stickers, media or calls):
 
 | Feature | How on the watch |
 |---|---|
@@ -79,28 +83,42 @@ everything the official app does for text chat (no mini apps, stickers, media or
 | Older messages | **Load earlier** at the top of a chat |
 | Log in | If the server isn't logged in, the watch shows the Zalo QR code to scan with your phone |
 
-Pinned and muted chats come from your Zalo account, so they match the phone app. The WebSocket is only open while
-the app is on screen, to save battery; for notifications while it's closed, keep relying on the Zalo phone app's
-notifications that the watch mirrors.
+Pinned and muted chats come from your Zalo account, so they match the phone app.
 
-### Install
+### Install (Zalo on the watch)
 
-1. Run the server so the watch can reach it, with a token, e.g.
-   `HOST=0.0.0.0 ACCESS_TOKEN=$(openssl rand -hex 24) npm start`.
-2. Get the APK: download `zalo-watch-debug-apk` from the latest **CI** run on GitHub, or build it with
-   `cd wear && ./gradlew assembleDebug` (Android Studio / Android SDK required).
-3. Enable *Developer options → ADB debugging* (and *Debug over Wi-Fi*) on the watch, then
-   `adb connect <watch-ip>:5555 && adb install app-debug.apk`.
-4. Open **Zalo Watch**, set the server address (e.g. `http://192.168.1.10:3000`) and the access token.
-   In the input screen pick *type on phone* to paste the token from your phone.
+1. Download `zalo-watch-debug-apk` from the latest **CI** run on GitHub. It holds one APK per CPU type; find
+   your watch's with `adb shell getprop ro.product.cpu.abi` (most watches: `armeabi-v7a` or `arm64-v8a`).
+2. Enable *Developer options → ADB debugging* and *Debug over Wi-Fi* on the watch, then
+   `adb connect <watch-ip>:5555 && adb install app-<abi>-debug.apk`.
+3. Open **Zalo Watch**. After "Starting Zalo…", tap **Log in with QR** and scan the code on the watch with the
+   Zalo app on your phone (QR-scanner icon next to the search bar), then confirm on the phone.
 
-The Wear OS emulator reaches a server on your computer at `http://10.0.2.2:3000`.
+The login is kept on the watch. Zalo stays connected in the background (a small "Connected to Zalo" notification
+shows this) and reconnects after a reboot, so 1:1 messages keep landing in the history while the app is closed.
+
+What it costs: about 25 MB to download and ~60 MB installed (the Node.js runtime), roughly 100 MB of RAM, and
+noticeably more battery than an app that only runs while open. *Settings → Restart Zalo service* restarts it;
+*Log out of Zalo* removes the session from the watch.
+
+### Using a server elsewhere instead
+
+Run the server as described above (with `HOST=0.0.0.0` and an `ACCESS_TOKEN`), then on the watch choose
+*Settings → Zalo runs on → Another device* and enter its address and token (pick *type on phone* to paste the
+token). The Wear OS emulator reaches a server on your computer at `http://10.0.2.2:3000`.
+
+### Building the app
+
+`cd wear && ./gradlew assembleDebug` needs the Android SDK/NDK and Node.js with `npm ci` run at the repo root:
+the build bundles `src/` with esbuild and downloads nodejs-mobile (checked against a pinned SHA-256).
 
 ## Security notes
 
 - `data/credentials.json` is equivalent to your logged-in Zalo session. It is written with `0600` permissions
   and is git-ignored. Never commit or share it.
 - **Log out** in the UI deletes the saved session and the message cache.
+- On the watch, the session lives in the app's private storage, and the on-watch server listens only on
+  `127.0.0.1` with a random token that only the app knows.
 
 ## API
 

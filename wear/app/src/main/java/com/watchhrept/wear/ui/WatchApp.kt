@@ -42,7 +42,13 @@ fun WatchApp(vm: AppViewModel) {
     MaterialTheme {
         Box(Modifier.fillMaxSize()) {
             if (!state.settings.isConfigured) {
-                SettingsScreen(state.settings, onSave = vm::saveSettings)
+                SettingsScreen(
+                    current = state.settings,
+                    loggedIn = false,
+                    onSave = vm::saveSettings,
+                    onRestartServer = vm::restartLocalServer,
+                    onLogout = vm::logout,
+                )
             } else {
                 AppNav(vm)
             }
@@ -67,7 +73,7 @@ private fun AppNav(vm: AppViewModel) {
                     onRetry = vm::startLiveUpdates,
                     onSettings = { nav.navigate(Routes.SETTINGS) },
                 )
-                status == null -> LoadingScreen()
+                status == null -> LoadingScreen(if (state.settings.onWatch) "Starting Zalo…" else null)
                 !status.isLoggedIn -> LoginScreen(
                     status = status,
                     onLogin = vm::login,
@@ -197,10 +203,22 @@ private fun AppNav(vm: AppViewModel) {
         }
         composable(Routes.SETTINGS) {
             val state by vm.state.collectAsStateWithLifecycle()
-            SettingsScreen(state.settings, onSave = {
-                vm.saveSettings(it)
-                nav.popBackStack()
-            })
+            SettingsScreen(
+                current = state.settings,
+                loggedIn = state.status?.isLoggedIn == true,
+                onSave = {
+                    vm.saveSettings(it)
+                    nav.popBackStack()
+                },
+                onRestartServer = {
+                    vm.restartLocalServer()
+                    nav.popBackStack()
+                },
+                onLogout = {
+                    vm.logout()
+                    nav.popBackStack()
+                },
+            )
         }
     }
 }

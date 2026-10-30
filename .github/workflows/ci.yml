@@ -17,6 +17,21 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm run bundle
+      # The watch embeds Node 18.20.4 (nodejs-mobile): check the bundle starts there with no node_modules.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18.20.4
+      - name: Bundle smoke test on Node 18
+        run: |
+          mkdir -p /tmp/bundle && cp dist/server.bundle.mjs /tmp/bundle/
+          cd /tmp/bundle
+          node --version
+          PORT=3999 ACCESS_TOKEN=t DATA_DIR=/tmp/bundle/data node server.bundle.mjs > server.log 2>&1 &
+          sleep 3
+          cat server.log
+          curl -fsS -H "Authorization: Bearer t" localhost:3999/api/status
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:3999/api/status)" = 401
 
   wear:
     runs-on: ubuntu-latest
@@ -25,12 +40,24 @@ jobs:
         working-directory: wear
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # The app bundles the server (../src) with esbuild.
+      - run: npm ci
+        working-directory: .
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/cache@v4
+        with:
+          path: wear/.nodejs-mobile
+          key: nodejs-mobile-${{ hashFiles('wear/app/build.gradle.kts') }}
       - run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+      # One APK per CPU type: arm64-v8a, armeabi-v7a (most watches) and x86_64 (emulator).
       - uses: actions/upload-artifact@v4
         with:
           name: zalo-watch-debug-apk

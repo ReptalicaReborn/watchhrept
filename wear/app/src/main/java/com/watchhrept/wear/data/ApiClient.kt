@@ -43,6 +43,8 @@ class ApiClient(serverUrl: String, private val token: String?) {
 
     suspend fun reconnect(): SessionStatus = post("reconnect")
 
+    suspend fun logout(): SessionStatus = post("logout")
+
     // ---- Messages ----
 
     suspend fun messages(kind: String, id: String, limit: Int, before: Long? = null): ThreadMessages =

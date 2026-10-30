@@ -14,6 +14,7 @@ import com.watchhrept.wear.data.SessionStatus
 import com.watchhrept.wear.data.SettingsStore
 import com.watchhrept.wear.data.ThreadRef
 import com.watchhrept.wear.data.ThreadSummary
+import com.watchhrept.wear.server.LocalServer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -69,16 +70,37 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var liveJob: Job? = null
     private var visible = false
     private var lastTypingSent = 0L
+    /** When the live loop last (re)started the on-watch server; errors are expected while it boots. */
+    private var localStartedAt = 0L
 
     init {
         rebuildClient()
     }
 
     fun saveSettings(settings: ServerSettings) {
+        val wasOnWatch = _state.value.settings.onWatch
         settingsStore.save(settings)
+        if (wasOnWatch && !settings.onWatch) LocalServer.stop(getApplication())
         _state.value = UiState(settings = settingsStore.load())
         rebuildClient()
         if (visible) startLiveUpdates()
+    }
+
+    /** Restarts the on-watch server, e.g. if it got stuck. */
+    fun restartLocalServer() {
+        if (!_state.value.settings.onWatch) return
+        LocalServer.stop(getApplication())
+        _state.update { it.copy(status = null, connectionError = null) }
+        viewModelScope.launch {
+            // Let the old process exit before starting a new one.
+            delay(1_500)
+            if (visible) startLiveUpdates()
+        }
+    }
+
+    fun logout() = launchApi { api ->
+        val status = api.logout()
+        _state.update { it.copy(status = status, threads = emptyList(), chat = null) }
     }
 
     /** Hold the WebSocket only while the app is visible, to save battery. */
@@ -86,17 +108,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         visible = true
         liveJob?.cancel()
         val api = client ?: return
+        val onWatch = _state.value.settings.onWatch
+        if (onWatch) {
+            LocalServer.start(getApplication())
+            localStartedAt = System.currentTimeMillis()
+        }
         liveJob = viewModelScope.launch {
             while (true) {
+                val booting = onWatch && System.currentTimeMillis() - localStartedAt < LOCAL_BOOT_GRACE_MS
                 try {
                     refreshAll(api)
                     api.events().collect { onEvent(api, it) }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    _state.update { it.copy(connectionError = e.message ?: "Cannot reach server") }
+                    // While the on-watch server boots, keep showing "starting" rather than an error.
+                    val error = if (booting) null else e.message ?: "Cannot reach server"
+                    _state.update { it.copy(connectionError = error) }
                 }
-                delay(RECONNECT_DELAY_MS)
+                delay(if (booting) LOCAL_BOOT_RETRY_MS else RECONNECT_DELAY_MS)
             }
         }
     }
@@ -237,7 +267,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun rebuildClient() {
         val settings = _state.value.settings
-        client = if (settings.isConfigured) ApiClient(settings.serverUrl, settings.token.ifBlank { null }) else null
+        client = when {
+            settings.onWatch -> ApiClient(LocalServer.URL, settingsStore.localToken())
+            settings.isConfigured -> ApiClient(settings.serverUrl, settings.token.ifBlank { null })
+            else -> null
+        }
     }
 
     private suspend fun refreshAll(api: ApiClient) {
@@ -353,6 +387,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val RECONNECT_DELAY_MS = 5_000L
+        const val LOCAL_BOOT_GRACE_MS = 45_000L
+        const val LOCAL_BOOT_RETRY_MS = 1_000L
         const val PAGE_SIZE = 30
         const val MAX_CHAT_MESSAGES = 300
 

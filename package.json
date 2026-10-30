@@ -12,7 +12,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/server.bundle.mjs --external:bufferutil --external:utf-8-validate --legal-comments=none --log-level=warning --banner:js=\"import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);\""
   },
   "dependencies": {
     "express": "^4.21.2",
@@ -23,6 +24,7 @@
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.13",
+    "esbuild": "^0.28.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
