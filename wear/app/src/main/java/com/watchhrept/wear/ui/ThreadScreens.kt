@@ -165,7 +165,7 @@ fun ChatOptionsScreen(
         item { ListHeader { Text(chat.name, maxLines = 1, overflow = TextOverflow.Ellipsis) } }
         item { ActionChip(if (pinned) "Unpin chat" else "Pin chat", { onPin(!pinned) }) }
         item {
-            if (thread?.isMuted == true) {
+            if (thread != null && thread.isMuted) {
                 ActionChip("Unmute", onUnmute, secondary = muteLabel(thread.mutedUntil))
             } else {
                 ActionChip("Mute notifications", onMute)

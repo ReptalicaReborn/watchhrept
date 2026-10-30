@@ -69,8 +69,8 @@ data class ChatMessage(
     /** Group chats only: how many members have seen it. */
     val seenCount: Int? = null,
 ) {
-    /** Plain text messages are the only kind the server can forward. */
-    val isText: Boolean get() = !recalled && attachment == null && !text.startsWith("[")
+    /** Plain text messages ("webchat" in Zalo) are the only kind the server can forward. */
+    val isText: Boolean get() = !recalled && attachment == null && msgType == "webchat"
 }
 
 /** Mirrors `ThreadSummary` in the server's src/store.ts. */
