@@ -1,5 +1,5 @@
 node_modules/
 dist/
 # Zalo session credentials and cached messages: never commit
-data/
+/data/
 .env
