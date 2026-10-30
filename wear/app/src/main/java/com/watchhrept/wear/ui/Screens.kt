@@ -7,12 +7,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,16 +24,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.ScalingLazyListScope
 import androidx.wear.compose.foundation.lazy.ScalingLazyListState
-import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.Chip
+import androidx.wear.compose.material.ChipColors
 import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.CircularProgressIndicator
 import androidx.wear.compose.material.ListHeader
@@ -47,17 +44,15 @@ import androidx.wear.compose.material.TimeText
 import androidx.wear.compose.material.Vignette
 import androidx.wear.compose.material.VignettePosition
 import com.watchhrept.wear.data.ApiClient
-import com.watchhrept.wear.data.ChatMessage
 import com.watchhrept.wear.data.ServerSettings
 import com.watchhrept.wear.data.SessionStatus
-import com.watchhrept.wear.data.ThreadSummary
+import kotlinx.coroutines.delay
 import java.text.DateFormat
-
-private val QUICK_REPLIES = listOf("OK", "👍", "Đang bận, nói sau nhé", "Đang trên đường", "Cảm ơn!")
+import java.text.Normalizer
 
 /** Standard round-screen list scaffold: time at the top, scroll indicator, vignette. */
 @Composable
-private fun WatchList(
+fun WatchList(
     listState: ScalingLazyListState = rememberScalingLazyListState(),
     content: ScalingLazyListScope.() -> Unit,
 ) {
@@ -76,13 +71,57 @@ private fun WatchList(
 }
 
 @Composable
-private fun CenteredText(text: String, color: Color = MaterialTheme.colors.onBackground) {
+fun CenteredText(
+    text: String,
+    color: Color = MaterialTheme.colors.onBackground,
+    style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.body2,
+) {
     Text(
         text = text,
         color = color,
         textAlign = TextAlign.Center,
-        style = MaterialTheme.typography.body2,
+        style = style,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+    )
+}
+
+/** A full-width chip with a single label, the building block of most menus. */
+@Composable
+fun ActionChip(
+    label: String,
+    onClick: () -> Unit,
+    secondary: String? = null,
+    enabled: Boolean = true,
+    colors: ChipColors = ChipDefaults.secondaryChipColors(),
+) {
+    Chip(
+        onClick = onClick,
+        enabled = enabled,
+        colors = colors,
+        label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        secondaryLabel = if (secondary != null) {
+            { Text(secondary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        } else {
+            null
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** Destructive action: the first tap arms it, a second tap within a few seconds runs it. */
+@Composable
+fun ConfirmChip(label: String, onConfirm: () -> Unit) {
+    var armed by remember { mutableStateOf(false) }
+    LaunchedEffect(armed) {
+        if (armed) {
+            delay(3_000)
+            armed = false
+        }
+    }
+    ActionChip(
+        label = if (armed) "Tap again to confirm" else label,
+        onClick = { if (armed) onConfirm() else armed = true },
+        colors = if (armed) ChipDefaults.chipColors(backgroundColor = MaterialTheme.colors.error) else ChipDefaults.secondaryChipColors(),
     )
 }
 
@@ -98,15 +137,8 @@ fun ConnectionErrorScreen(error: String, onRetry: () -> Unit, onSettings: () -> 
     WatchList {
         item { ListHeader { Text("Can't reach server") } }
         item { CenteredText(error, MaterialTheme.colors.error) }
-        item { Chip(onClick = onRetry, label = { Text("Retry") }, modifier = Modifier.fillMaxWidth()) }
-        item {
-            Chip(
-                onClick = onSettings,
-                label = { Text("Settings") },
-                colors = ChipDefaults.secondaryChipColors(),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+        item { ActionChip("Retry", onRetry, colors = ChipDefaults.primaryChipColors()) }
+        item { ActionChip("Settings", onSettings) }
     }
 }
 
@@ -137,161 +169,10 @@ fun LoginScreen(status: SessionStatus, onLogin: () -> Unit, onSettings: () -> Un
                 }
             }
             status.state == "logging_in" -> item { CircularProgressIndicator() }
-            else -> item {
-                Chip(onClick = onLogin, label = { Text("Log in with QR") }, modifier = Modifier.fillMaxWidth())
-            }
+            else -> item { ActionChip("Log in with QR", onLogin, colors = ChipDefaults.primaryChipColors()) }
         }
         status.error?.let { error -> item { CenteredText(error, MaterialTheme.colors.error) } }
-        item {
-            Chip(
-                onClick = onSettings,
-                label = { Text("Server settings") },
-                colors = ChipDefaults.secondaryChipColors(),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-}
-
-@Composable
-fun ThreadListScreen(
-    state: UiState,
-    onOpen: (ThreadSummary) -> Unit,
-    onReconnect: () -> Unit,
-    onSettings: () -> Unit,
-) {
-    // Contacts we have never talked to are only useful with search, which a watch doesn't have.
-    val threads = state.threads.filter { it.lastMessage != null }
-
-    WatchList {
-        item { ListHeader { Text(state.status?.ownName ?: "Zalo") } }
-        if (state.status?.state == "disconnected") {
-            item {
-                Chip(
-                    onClick = onReconnect,
-                    label = { Text("Disconnected") },
-                    secondaryLabel = { Text("Tap to reconnect", maxLines = 1) },
-                    colors = ChipDefaults.chipColors(backgroundColor = MaterialTheme.colors.error),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-        state.connectionError?.let { error -> item { CenteredText("Offline: $error", MaterialTheme.colors.error) } }
-        if (threads.isEmpty()) item { CenteredText("No chats yet") }
-        items(threads, key = { "${it.kind}:${it.id}" }) { thread -> ThreadChip(thread, onClick = { onOpen(thread) }) }
-        item {
-            Chip(
-                onClick = onSettings,
-                label = { Text("Settings") },
-                colors = ChipDefaults.secondaryChipColors(),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-}
-
-@Composable
-private fun ThreadChip(thread: ThreadSummary, onClick: () -> Unit) {
-    val last = thread.lastMessage
-    val preview = when {
-        last == null -> ""
-        last.isSelf -> "You: ${last.text}"
-        thread.kind == "group" -> "${last.fromName}: ${last.text}"
-        else -> last.text
-    }
-    val hasUnread = thread.unread > 0
-
-    Chip(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        colors = if (hasUnread) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
-        icon = {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(ChipDefaults.IconSize)
-                    .background(MaterialTheme.colors.surface, CircleShape),
-            ) {
-                Text(
-                    text = if (hasUnread) thread.unread.coerceAtMost(99).toString() else initial(thread.name),
-                    style = MaterialTheme.typography.caption2,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colors.onSurface,
-                )
-            }
-        },
-        label = {
-            Text(
-                text = (if (thread.kind == "group") "👥 " else "") + thread.name,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        secondaryLabel = { Text(preview, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-    )
-}
-
-@Composable
-fun ChatScreen(chat: ChatState, onSend: (String) -> Unit) {
-    val listState = rememberScalingLazyListState()
-    val openInput = rememberTextInput(onResult = onSend)
-
-    // Header is item 0, so the newest message is at index messages.size.
-    LaunchedEffect(chat.messages.size) {
-        if (chat.messages.isNotEmpty()) listState.scrollToItem(chat.messages.size)
-    }
-
-    WatchList(listState) {
-        item {
-            ListHeader {
-                Text(chat.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-        if (chat.loading && chat.messages.isEmpty()) item { CircularProgressIndicator() }
-        items(chat.messages, key = { it.id }) { msg -> MessageBubble(msg, showSender = chat.kind == "group") }
-        item {
-            Chip(
-                onClick = { openInput("Reply to ${chat.name}", QUICK_REPLIES) },
-                enabled = !chat.sending,
-                label = { Text(if (chat.sending) "Sending…" else "Reply") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-}
-
-@Composable
-private fun MessageBubble(msg: ChatMessage, showSender: Boolean) {
-    Box(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = if (msg.isSelf) Alignment.CenterEnd else Alignment.CenterStart,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth(0.85f)
-                .background(
-                    if (msg.isSelf) Color(0xFF1E3A5F) else MaterialTheme.colors.surface,
-                    RoundedCornerShape(12.dp),
-                )
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-        ) {
-            if (showSender && !msg.isSelf) {
-                Text(
-                    msg.fromName,
-                    style = MaterialTheme.typography.caption2,
-                    color = MaterialTheme.colors.primary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Text(msg.text, style = MaterialTheme.typography.body2, color = MaterialTheme.colors.onSurface)
-            Text(
-                formatTime(msg.ts),
-                style = MaterialTheme.typography.caption3,
-                color = MaterialTheme.colors.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.End),
-            )
-        }
+        item { ActionChip("Server settings", onSettings) }
     }
 }
 
@@ -306,29 +187,25 @@ fun SettingsScreen(current: ServerSettings, onSave: (ServerSettings) -> Unit) {
     WatchList {
         item { ListHeader { Text("Server") } }
         item {
-            Chip(
+            ActionChip(
+                label = "Address",
+                secondary = serverUrl.ifBlank { "Not set" },
                 onClick = { editUrl("Server address", listOf("http://10.0.2.2:3000")) },
-                label = { Text("Address") },
-                secondaryLabel = { Text(serverUrl.ifBlank { "Not set" }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                colors = ChipDefaults.secondaryChipColors(),
-                modifier = Modifier.fillMaxWidth(),
             )
         }
         item {
-            Chip(
+            ActionChip(
+                label = "Access token",
+                secondary = if (token.isBlank()) "None" else "•".repeat(8),
                 onClick = { editToken("Access token", emptyList()) },
-                label = { Text("Access token") },
-                secondaryLabel = { Text(if (token.isBlank()) "None" else "•".repeat(8)) },
-                colors = ChipDefaults.secondaryChipColors(),
-                modifier = Modifier.fillMaxWidth(),
             )
         }
         item {
-            Chip(
-                onClick = { onSave(ServerSettings(serverUrl, token)) },
+            ActionChip(
+                label = "Save",
                 enabled = valid,
-                label = { Text("Save") },
-                modifier = Modifier.fillMaxWidth(),
+                onClick = { onSave(ServerSettings(serverUrl, token)) },
+                colors = ChipDefaults.primaryChipColors(),
             )
         }
         item {
@@ -340,10 +217,23 @@ fun SettingsScreen(current: ServerSettings, onSave: (ServerSettings) -> Unit) {
     }
 }
 
-private fun initial(name: String): String = name.trim().firstOrNull()?.uppercase() ?: "?"
+fun initial(name: String): String = name.trim().firstOrNull()?.uppercase() ?: "?"
 
-private fun formatTime(ts: Long): String =
+fun formatTime(ts: Long): String =
     DateUtils.formatSameDayTime(ts, System.currentTimeMillis(), DateFormat.SHORT, DateFormat.SHORT).toString()
+
+/** "Active now" / "Active 5 minutes ago" from Zalo's last-online timestamp (seconds or ms). */
+fun formatPresence(lastOnline: Long, now: Long = System.currentTimeMillis()): String {
+    val ms = if (lastOnline < 100_000_000_000L) lastOnline * 1000 else lastOnline
+    if (now - ms < 5 * DateUtils.MINUTE_IN_MILLIS) return "Active now"
+    return "Active " + DateUtils.getRelativeTimeSpanString(ms, now, DateUtils.MINUTE_IN_MILLIS)
+}
+
+/** Lowercase and strip Vietnamese diacritics so "duc" finds "Đức". */
+fun foldForSearch(s: String): String =
+    Normalizer.normalize(s.lowercase(), Normalizer.Form.NFD)
+        .replace(Regex("\\p{Mn}+"), "")
+        .replace('đ', 'd')
 
 private fun decodeDataUrl(dataUrl: String) = runCatching {
     val bytes = Base64.decode(dataUrl.substringAfter(','), Base64.DEFAULT)

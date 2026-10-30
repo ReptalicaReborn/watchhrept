@@ -7,10 +7,13 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
@@ -36,19 +39,91 @@ class ApiClient(serverUrl: String, private val token: String?) {
 
     suspend fun threads(): List<ThreadSummary> = get("threads")
 
-    suspend fun messages(kind: String, id: String, limit: Int = 40): ThreadMessages =
-        get("threads/$kind/$id/messages", "limit" to limit.toString())
-
     suspend fun login(): SessionStatus = post("login")
 
     suspend fun reconnect(): SessionStatus = post("reconnect")
 
-    suspend fun send(kind: String, id: String, text: String) {
-        post<Unit>("threads/$kind/$id/messages", buildJsonObject { put("text", text) }.toString())
+    // ---- Messages ----
+
+    suspend fun messages(kind: String, id: String, limit: Int, before: Long? = null): ThreadMessages =
+        get(
+            "threads/$kind/$id/messages",
+            *listOfNotNull("limit" to limit.toString(), before?.let { "before" to it.toString() }).toTypedArray(),
+        )
+
+    suspend fun send(kind: String, id: String, text: String, quoteId: String? = null, mentions: List<Mention> = emptyList()) {
+        val body = buildJsonObject {
+            put("text", text)
+            quoteId?.let { put("quoteId", it) }
+            if (mentions.isNotEmpty()) {
+                putJsonArray("mentions") {
+                    mentions.forEach { m ->
+                        addJsonObject {
+                            put("uid", m.uid)
+                            put("pos", m.pos)
+                            put("len", m.len)
+                        }
+                    }
+                }
+            }
+        }
+        post<Unit>("threads/$kind/$id/messages", body.toString())
     }
+
+    /** [reaction] is a reaction key such as "heart", or null to remove ours. */
+    suspend fun react(kind: String, id: String, msgId: String, reaction: String?) {
+        httpPut("threads/$kind/$id/messages/$msgId/reaction", buildJsonObject { put("reaction", reaction) }.toString())
+    }
+
+    suspend fun recall(kind: String, id: String, msgId: String) {
+        post<Unit>("threads/$kind/$id/messages/$msgId/recall")
+    }
+
+    suspend fun deleteForMe(kind: String, id: String, msgId: String) {
+        httpDelete("threads/$kind/$id/messages/$msgId")
+    }
+
+    suspend fun forward(kind: String, id: String, msgId: String, targets: List<ThreadRef>) {
+        val body = buildJsonObject {
+            putJsonArray("to") {
+                targets.forEach { t ->
+                    addJsonObject {
+                        put("kind", t.kind)
+                        put("id", t.id)
+                    }
+                }
+            }
+        }
+        post<Unit>("threads/$kind/$id/messages/$msgId/forward", body.toString())
+    }
+
+    // ---- Conversations ----
+
+    suspend fun details(kind: String, id: String): ThreadDetails = get("threads/$kind/$id/info")
 
     suspend fun markRead(kind: String, id: String) {
         post<Unit>("threads/$kind/$id/read")
+    }
+
+    suspend fun markUnread(kind: String, id: String) {
+        post<Unit>("threads/$kind/$id/unread")
+    }
+
+    suspend fun typing(kind: String, id: String) {
+        post<Unit>("threads/$kind/$id/typing")
+    }
+
+    suspend fun setPinned(kind: String, id: String, pinned: Boolean) {
+        httpPut("threads/$kind/$id/pin", buildJsonObject { put("pinned", pinned) }.toString())
+    }
+
+    /** [option] null unmutes. */
+    suspend fun setMuted(kind: String, id: String, option: MuteOption?) {
+        httpPut("threads/$kind/$id/mute", buildJsonObject { put("duration", option?.apiValue) }.toString())
+    }
+
+    suspend fun deleteConversation(kind: String, id: String) {
+        httpDelete("threads/$kind/$id")
     }
 
     /** Live server events. Completes or throws when the socket closes; callers reconnect. */
@@ -82,6 +157,10 @@ class ApiClient(serverUrl: String, private val token: String?) {
         return when (obj["type"]?.jsonPrimitive?.content) {
             "status" -> ServerEvent.Status(json.decodeFromJsonElement(SessionStatus.serializer(), obj.getValue("status")))
             "message" -> ServerEvent.Message(json.decodeFromJsonElement(ChatMessage.serializer(), obj.getValue("message")))
+            "message_updated" ->
+                ServerEvent.MessageUpdated(json.decodeFromJsonElement(ChatMessage.serializer(), obj.getValue("message")))
+            "message_deleted" -> ServerEvent.MessageDeleted(obj.threadRef(), obj.string("id"))
+            "typing" -> ServerEvent.Typing(obj.threadRef(), obj.string("uid"), obj.string("name"))
             "threads" -> ServerEvent.ThreadsChanged
             else -> null
         }
@@ -92,6 +171,18 @@ class ApiClient(serverUrl: String, private val token: String?) {
 
     private suspend inline fun <reified T> post(path: String, body: String = ""): T =
         execute(Request.Builder().url(url(path)).post(body.toRequestBody(JSON_MEDIA_TYPE)))
+
+    private suspend fun httpPut(path: String, body: String) {
+        execute<Unit>(Request.Builder().url(url(path)).put(body.toRequestBody(JSON_MEDIA_TYPE)))
+    }
+
+    private suspend fun httpDelete(path: String) {
+        execute<Unit>(Request.Builder().url(url(path)).delete())
+    }
+
+    private fun JsonObject.string(key: String): String = this[key]?.jsonPrimitive?.content.orEmpty()
+
+    private fun JsonObject.threadRef(): ThreadRef = ThreadRef(string("threadKind"), string("threadId"))
 
     private suspend inline fun <reified T> execute(builder: Request.Builder): T = withContext(Dispatchers.IO) {
         token?.let { builder.header("Authorization", "Bearer $it") }

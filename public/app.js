@@ -135,6 +135,15 @@ function messageEl(m) {
         li.append(from);
     }
 
+    if (m.quote) {
+        const quote = document.createElement("span");
+        quote.className = "quote";
+        quote.textContent = `↩ ${m.quote.fromName}: ${m.quote.text}`;
+        li.append(quote);
+    }
+    li.classList.toggle("recalled", !!m.recalled);
+    li.classList.toggle("mentions-me", !!m.mentionsMe);
+
     const href = safeUrl(m.attachment?.href);
     if (m.msgType === "chat.photo" && (m.attachment?.thumb || href)) {
         const img = document.createElement("img");
@@ -152,6 +161,13 @@ function messageEl(m) {
         li.append(a);
     } else {
         li.append(document.createTextNode(m.text));
+    }
+
+    if (m.reactions?.length) {
+        const reactions = document.createElement("span");
+        reactions.className = "reactions";
+        reactions.textContent = m.reactions.map((r) => (r.count > 1 ? `${r.emoji}${r.count}` : r.emoji)).join(" ");
+        li.append(reactions);
     }
 
     const time = document.createElement("span");
@@ -229,6 +245,18 @@ function onIncoming(m) {
     }
 }
 
+function onUpdated(m) {
+    if (isCurrent(m.threadKind, m.threadId)) {
+        state.messages = state.messages.map((x) => (x.id === m.id ? m : x));
+        renderMessages();
+    }
+    const t = state.threads.find((t) => t.lastMessage?.id === m.id);
+    if (t) {
+        t.lastMessage = m;
+        renderThreads();
+    }
+}
+
 // ---- Live updates ----
 
 function connect() {
@@ -243,6 +271,14 @@ function connect() {
             if (event.status.state === "ready" && !wasLoggedIn) void loadThreads();
         } else if (event.type === "message") {
             onIncoming(event.message);
+        } else if (event.type === "message_updated") {
+            onUpdated(event.message);
+        } else if (event.type === "message_deleted") {
+            if (isCurrent(event.threadKind, event.threadId)) {
+                state.messages = state.messages.filter((m) => m.id !== event.id);
+                renderMessages();
+            }
+            void loadThreads();
         } else if (event.type === "threads") {
             void loadThreads();
         }

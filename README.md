@@ -48,6 +48,7 @@ For development: `npm run dev` (auto-reload), `npm test`, `npm run typecheck`.
 | `PORT` | `3000` | Port |
 | `DATA_DIR` | `./data` | Where the session and message cache are stored |
 | `ACCESS_TOKEN` | *(none)* | Required for every API/WebSocket request when set. **Mandatory** if `HOST` is not loopback |
+| `READ_RECEIPTS` | `true` | Send "seen" receipts to Zalo when you read a chat, like the official app. `false` to read silently |
 
 To use it from your phone or watch, expose it with a token and open `http://<server>:3000/?token=<ACCESS_TOKEN>`
 once on each device (the token is remembered). Put it behind HTTPS (a reverse proxy, Tailscale, etc.) if it
@@ -59,14 +60,28 @@ HOST=0.0.0.0 ACCESS_TOKEN=$(openssl rand -hex 24) npm start
 
 ## Wear OS app
 
-`wear/` is a standalone Wear OS 3+ app (Kotlin, Compose for Wear OS) that talks to this server.
+`wear/` is a standalone Wear OS 3+ app (Kotlin, Compose for Wear OS) that talks to this server. It covers
+everything the official app does for text chat (no mini apps, stickers, media or calls):
 
-- **Chat list** with unread counts, **chat view** with the latest messages, live updates over the WebSocket.
-- **Reply** by voice, keyboard, emoji, quick replies, or typing on the paired phone (the system Wear input screen).
-- **Log in from the watch**: if the server isn't logged in yet, the watch shows the Zalo QR code; scan it with
-  the Zalo app on your phone.
-- The WebSocket is only open while the app is on screen, to save battery. For notifications while it's closed,
-  keep relying on the normal Zalo phone app notifications that the watch mirrors.
+| Feature | How on the watch |
+|---|---|
+| Chat list | Pinned first (📌), muted (🔕), unread counts, `@` when you're mentioned, live "typing…" |
+| New chat | **New chat** → search any friend or group by voice or keyboard (diacritics optional: "duc" finds "Đức") |
+| Read & reply | Voice, keyboard, emoji, quick replies, or type on the paired phone |
+| Reply to a message (quote) | Tap a message → **Reply** |
+| Reactions | Tap a message → ❤️ 👍 😆 😮 😭 😡 (tap yours again to remove) |
+| Recall for everyone / delete for me | Tap a message → confirm with a second tap |
+| Forward | Tap a text message → **Forward** → pick a chat |
+| @mention in groups | **@ Mention someone** → pick a member → type |
+| Seen / delivered | Under your latest message ("Seen", "Seen by 3" in groups); others see your seen receipts too |
+| Last online | Under the name in 1:1 chats |
+| Pin, mute (1 h, 4 h, until 8 AM, until turned on), mark unread, delete conversation | **Chat options** |
+| Older messages | **Load earlier** at the top of a chat |
+| Log in | If the server isn't logged in, the watch shows the Zalo QR code to scan with your phone |
+
+Pinned and muted chats come from your Zalo account, so they match the phone app. The WebSocket is only open while
+the app is on screen, to save battery; for notifications while it's closed, keep relying on the Zalo phone app's
+notifications that the watch mirrors.
 
 ### Install
 
@@ -97,15 +112,26 @@ All endpoints are under `/api` and accept `Authorization: Bearer <token>` (or `?
 | `POST` | `/login` | Start a QR login |
 | `POST` | `/logout` | Log out and delete saved data |
 | `POST` | `/reconnect` | Restart the real-time listener |
-| `GET` | `/threads` | Chats and contacts, most recent first, with unread counts |
+| `GET` | `/threads` | Chats and contacts: pinned first, then most recent; unread counts, `pinned`, `mutedUntil` |
+| `GET` | `/threads/:kind/:id/info` | `{lastOnline}` for users, `{members}` for groups |
 | `GET` | `/threads/:kind/:id/messages?before=&limit=` | Messages (`kind` is `user` or `group`) |
-| `POST` | `/threads/:kind/:id/messages` | Send `{ "text": "..." }` |
-| `POST` | `/threads/:kind/:id/read` | Mark a chat as read (locally) |
+| `POST` | `/threads/:kind/:id/messages` | Send `{ "text", "quoteId"?, "mentions"?: [{uid, pos, len}] }` |
+| `PUT` | `/threads/:kind/:id/messages/:msgId/reaction` | `{ "reaction": "heart" }` (see `GET /reactions`), `null` to remove |
+| `POST` | `/threads/:kind/:id/messages/:msgId/recall` | Recall your own message for everyone |
+| `DELETE` | `/threads/:kind/:id/messages/:msgId` | Delete a message for yourself |
+| `POST` | `/threads/:kind/:id/messages/:msgId/forward` | `{ "to": [{kind, id}] }` (text messages) |
+| `POST` | `/threads/:kind/:id/read` | Mark read (sends seen receipts unless `READ_RECEIPTS=false`) |
+| `POST` | `/threads/:kind/:id/unread` | Mark as unread |
+| `POST` | `/threads/:kind/:id/typing` | Show "typing…" to the other side |
+| `PUT` | `/threads/:kind/:id/pin` | `{ "pinned": true }` |
+| `PUT` | `/threads/:kind/:id/mute` | `{ "duration": "1h" \| "4h" \| "8am" \| "forever" \| null }` |
+| `DELETE` | `/threads/:kind/:id` | Delete the conversation |
 
-`GET /ws` is a WebSocket that pushes `{type:"status"}`, `{type:"message"}` and `{type:"threads"}` events.
+`GET /ws` is a WebSocket that pushes `status`, `message`, `message_updated` (reactions, recalls, receipts),
+`message_deleted`, `typing` and `threads` events.
 A native watch or phone app can use this API directly instead of the web UI.
 
 ## Not yet supported
 
-Sending photos, stickers, files or voice; reactions; read receipts to Zalo; calls. `zca-js` supports most of
-these, so they can be added to `src/session.ts` and exposed through the API.
+Sending photos, stickers, files or voice; calls; mini apps; editing your profile or friend requests. `zca-js`
+supports most of these, so they can be added to `src/session.ts` and exposed through the API.
