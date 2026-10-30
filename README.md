@@ -97,8 +97,9 @@ Pinned and muted chats come from your Zalo account, so they match the phone app.
 The login is kept on the watch. Zalo stays connected in the background (a small "Connected to Zalo" notification
 shows this) and reconnects after a reboot, so 1:1 messages keep landing in the history while the app is closed.
 
-What it costs: about 25 MB to download and ~60 MB installed (the Node.js runtime), roughly 100 MB of RAM, and
-noticeably more battery than an app that only runs while open. *Settings → Restart Zalo service* restarts it;
+What it costs: each APK is about 42 MB and the app takes roughly 95 MB once installed (the Node.js runtime is
+~50 MB unpacked), it uses on the order of 100 MB of RAM, and noticeably more battery than an app that only runs
+while open. *Settings → Restart Zalo service* restarts it;
 *Log out of Zalo* removes the session from the watch.
 
 ### Using a server elsewhere instead
