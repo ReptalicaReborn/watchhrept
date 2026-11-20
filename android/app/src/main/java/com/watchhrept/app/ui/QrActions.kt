@@ -16,9 +16,13 @@ import java.io.File
  */
 object QrActions {
     /** Saves [qr] to Pictures/Zalo Lite. Returns false when it couldn't. */
-    fun saveToGallery(context: Context, qr: Bitmap): Boolean = runCatching {
-        val name = "zalo-login-${System.currentTimeMillis()}.png"
-        val image = withQuietZone(qr)
+    fun saveToGallery(context: Context, qr: Bitmap): Boolean = try {
+        save(context, withQuietZone(qr), "zalo-login-${System.currentTimeMillis()}.png")
+    } catch (e: Exception) {
+        false
+    }
+
+    private fun save(context: Context, image: Bitmap, name: String): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, name)
@@ -27,8 +31,8 @@ object QrActions {
             }
             val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                 ?: return false
-            context.contentResolver.openOutputStream(uri)?.use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                ?: return false
+            val out = context.contentResolver.openOutputStream(uri) ?: return false
+            out.use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         } else {
             @Suppress("DEPRECATION")
             val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Zalo Lite")
@@ -38,8 +42,8 @@ object QrActions {
             @Suppress("DEPRECATION")
             context.sendBroadcast(Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, android.net.Uri.fromFile(file)))
         }
-        true
-    }.getOrDefault(false)
+        return true
+    }
 
     /** Opens the share sheet with the QR image, e.g. to send it to a computer or another phone. */
     fun share(context: Context, qr: Bitmap) {

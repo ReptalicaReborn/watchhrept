@@ -305,7 +305,8 @@ private fun MessageList(chat: ChatState, onLongPress: (ChatMessage) -> Unit, onL
             info.totalItemsCount > 0 && last >= info.totalItemsCount - 3
         }
     }
-    LaunchedEffect(listState, chat.hasMore) {
+    // Re-checked after each page, so it keeps loading while the top of the chat is in view.
+    LaunchedEffect(listState, chat.hasMore, chat.messages.size) {
         snapshotFlow { nearTop }.collect { if (it && chat.hasMore) onLoadEarlier() }
     }
     // Follow new messages when already at the bottom.
@@ -627,8 +628,8 @@ private fun Composer(
     val mentionQuery = remember(value, isGroup) { if (isGroup) mentionQueryAt(value) else null }
     LaunchedEffect(mentionQuery != null) { if (mentionQuery != null) onLoadMembers() }
     val suggestions = remember(mentionQuery, members) {
-        val q = mentionQuery?.let { foldForSearch(it.second) } ?: return@remember emptyList()
-        members.orEmpty().filter { foldForSearch(it.name).contains(q) }.take(6)
+        val q = mentionQuery?.let { foldForSearch(it.second) }
+        if (q == null) emptyList() else members.orEmpty().filter { foldForSearch(it.name).contains(q) }.take(6)
     }
 
     fun insertMention(member: GroupMember) {
@@ -676,10 +677,13 @@ private fun Composer(
             ) {
                 if (isGroup) {
                     IconButton(onClick = {
-                        val pos = value.selection.start
-                        val needsSpace = pos > 0 && !value.text[pos - 1].isWhitespace()
+                        val start = value.selection.min
+                        val needsSpace = start > 0 && !value.text[start - 1].isWhitespace()
                         val insert = if (needsSpace) " @" else "@"
-                        value = TextFieldValue(value.text.replaceRange(pos, value.selection.end, insert), TextRange(pos + insert.length))
+                        value = TextFieldValue(
+                            value.text.replaceRange(start, value.selection.max, insert),
+                            TextRange(start + insert.length),
+                        )
                     }) { Icon(Icons.Outlined.AlternateEmail, contentDescription = "Mention someone") }
                 }
                 OutlinedTextField(

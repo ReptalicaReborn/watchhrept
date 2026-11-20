@@ -116,11 +116,11 @@ private fun AppNav(vm: AppViewModel) {
                 )
             }
         }
-        for (route in listOf(Routes.NEW_CHAT, Routes.SEARCH)) {
-            composable(route) {
+        for (destination in listOf(Routes.NEW_CHAT, Routes.SEARCH)) {
+            composable(destination) {
                 val state by vm.state.collectAsStateWithLifecycle()
                 ContactsScreen(
-                    title = if (route == Routes.NEW_CHAT) "Search friends and groups" else "Search chats",
+                    title = if (destination == Routes.NEW_CHAT) "Search friends and groups" else "Search chats",
                     threads = state.threads,
                     onBack = { nav.popBackStack() },
                     onPick = { thread ->
