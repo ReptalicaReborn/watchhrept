@@ -75,11 +75,15 @@ fun muteLabel(mutedUntil: Long?): String = when {
     else -> "Muted until ${formatTime(mutedUntil)}"
 }
 
-/** One-line preview of a message for the chat list. */
-fun preview(msg: ChatMessage?): String = when {
-    msg == null -> ""
-    msg.recalled -> "Message recalled"
-    msg.isSelf -> "You: ${msg.text}"
-    msg.threadKind == "group" && msg.fromName.isNotBlank() -> "${msg.fromName}: ${msg.text}"
-    else -> msg.text
+/** Preview of a message for the chat list; group chats say who wrote it. */
+fun preview(msg: ChatMessage?): String {
+    if (msg == null) return ""
+    if (msg.recalled) return "Message recalled"
+    val body = msg.text.ifBlank { msg.attachment?.let { "📎 " + (it.title?.takeIf(String::isNotBlank) ?: "Attachment") }.orEmpty() }
+    return when {
+        msg.threadKind != "group" -> body
+        msg.isSelf -> "You: $body"
+        msg.fromName.isNotBlank() -> "${msg.fromName}: $body"
+        else -> body
+    }
 }

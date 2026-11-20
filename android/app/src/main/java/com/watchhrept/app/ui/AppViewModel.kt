@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.watchhrept.app.data.ApiClient
+import com.watchhrept.app.data.Appearance
 import com.watchhrept.app.data.ChatMessage
 import com.watchhrept.app.data.GroupMember
 import com.watchhrept.app.data.Mention
@@ -38,6 +39,8 @@ data class ChatState(
     val lastOnline: Long? = null,
     /** Group chats: members, loaded on demand for @mentions. */
     val members: List<GroupMember>? = null,
+    /** First message that was unread when the chat was opened, for the "unread messages" divider. */
+    val firstUnreadId: String? = null,
 ) {
     val ref: ThreadRef get() = ThreadRef(kind, id)
 }
@@ -46,6 +49,7 @@ data class TypingInfo(val name: String, val at: Long)
 
 data class UiState(
     val settings: ServerSettings,
+    val appearance: Appearance = Appearance(),
     val status: SessionStatus? = null,
     /** Set while the server cannot be reached; the UI keeps showing cached data. */
     val connectionError: String? = null,
@@ -63,7 +67,7 @@ const val TYPING_TIMEOUT_MS = 6_000L
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val settingsStore = SettingsStore(app)
-    private val _state = MutableStateFlow(UiState(settings = settingsStore.load()))
+    private val _state = MutableStateFlow(UiState(settings = settingsStore.load(), appearance = settingsStore.loadAppearance()))
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private var client: ApiClient? = null
@@ -77,11 +81,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         rebuildClient()
     }
 
+    fun setAppearance(appearance: Appearance) {
+        settingsStore.saveAppearance(appearance)
+        _state.update { it.copy(appearance = appearance) }
+    }
+
     fun saveSettings(settings: ServerSettings) {
         val wasOnWatch = _state.value.settings.onDevice
         settingsStore.save(settings)
         if (wasOnWatch && !settings.onDevice) LocalServer.stop(getApplication())
-        _state.value = UiState(settings = settingsStore.load())
+        _state.value = UiState(settings = settingsStore.load(), appearance = _state.value.appearance)
         rebuildClient()
         if (visible) startLiveUpdates()
     }
@@ -163,11 +172,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(chat = ChatState(thread.kind, thread.id, thread.name)) }
         launchApi { api ->
             val res = api.messages(thread.kind, thread.id, PAGE_SIZE)
+            val unread = _state.value.threads.firstOrNull { it.ref == thread.ref }?.unread ?: thread.unread
+            val firstUnread = if (unread > 0) res.messages.filter { !it.isSelf }.takeLast(unread).firstOrNull()?.id else null
             updateChat(thread.ref) {
                 it.copy(
                     messages = merge(it.messages, res.messages),
                     loading = false,
                     hasMore = res.messages.size >= PAGE_SIZE,
+                    firstUnreadId = firstUnread,
                 )
             }
             markRead(api, thread.ref)
@@ -259,15 +271,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- Conversation actions ----
 
-    fun setPinned(pinned: Boolean) = withChat { api, chat -> api.setPinned(chat.kind, chat.id, pinned) }
+    // These work on any conversation (chat list long-press) as well as the open one;
+    // the server pushes the resulting thread-list changes.
 
-    fun setMuted(option: MuteOption?) = withChat { api, chat -> api.setMuted(chat.kind, chat.id, option) }
+    fun setPinned(ref: ThreadRef, pinned: Boolean) = launchApi { api -> api.setPinned(ref.kind, ref.id, pinned) }
 
-    fun markUnread() = withChat { api, chat -> api.markUnread(chat.kind, chat.id) }
+    fun setMuted(ref: ThreadRef, option: MuteOption?) = launchApi { api -> api.setMuted(ref.kind, ref.id, option) }
 
-    fun deleteConversation() = withChat { api, chat ->
-        api.deleteConversation(chat.kind, chat.id)
-        updateChat(chat.ref) { it.copy(messages = emptyList(), hasMore = false) }
+    fun markUnread(ref: ThreadRef) = launchApi { api -> api.markUnread(ref.kind, ref.id) }
+
+    fun markThreadRead(ref: ThreadRef) = launchApi { api -> markRead(api, ref) }
+
+    fun markAllRead() = launchApi { api ->
+        _state.value.threads.filter { it.unread > 0 }.forEach { markRead(api, it.ref) }
+    }
+
+    fun deleteConversation(ref: ThreadRef) = launchApi { api ->
+        api.deleteConversation(ref.kind, ref.id)
+        updateChat(ref) { it.copy(messages = emptyList(), hasMore = false) }
     }
 
     // ---- Internals ----
@@ -369,12 +390,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val chat = s.chat
             if (chat != null && chat.ref == ref) s.copy(chat = fn(chat)) else s
         }
-    }
-
-    /** Runs a conversation-level action on the open chat; the server pushes the resulting changes. */
-    private fun withChat(block: suspend (ApiClient, ChatState) -> Unit) {
-        val chat = _state.value.chat ?: return
-        launchApi { api -> block(api, chat) }
     }
 
     private fun launchApi(onDone: () -> Unit = {}, block: suspend (ApiClient) -> Unit) {

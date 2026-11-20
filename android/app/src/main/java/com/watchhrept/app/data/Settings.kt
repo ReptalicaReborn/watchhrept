@@ -14,6 +14,18 @@ data class ServerSettings(
     val isConfigured: Boolean get() = onDevice || ApiClient.normalizeServerUrl(serverUrl) != null
 }
 
+enum class ThemeMode(val label: String) {
+    SYSTEM("System default"),
+    LIGHT("Light"),
+    DARK("Dark"),
+}
+
+data class Appearance(
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /** Material You colors from the wallpaper (Android 12+) instead of the app's blue. */
+    val dynamicColor: Boolean = false,
+)
+
 /** Server settings, kept in app-private storage shared by the UI and the on-phone server process. */
 class SettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -36,6 +48,18 @@ class SettingsStore(context: Context) {
             .commit()
     }
 
+    fun loadAppearance(): Appearance = Appearance(
+        themeMode = ThemeMode.entries.firstOrNull { it.name == prefs.getString(KEY_THEME, null) } ?: ThemeMode.SYSTEM,
+        dynamicColor = prefs.getBoolean(KEY_DYNAMIC_COLOR, false),
+    )
+
+    fun saveAppearance(appearance: Appearance) {
+        prefs.edit()
+            .putString(KEY_THEME, appearance.themeMode.name)
+            .putBoolean(KEY_DYNAMIC_COLOR, appearance.dynamicColor)
+            .apply()
+    }
+
     /**
      * Secret shared between the UI and the on-phone server, so other apps on the phone can't use
      * the server's localhost port. Created on first use.
@@ -54,5 +78,7 @@ class SettingsStore(context: Context) {
         const val KEY_URL = "server_url"
         const val KEY_TOKEN = "token"
         const val KEY_LOCAL_TOKEN = "local_token"
+        const val KEY_THEME = "theme"
+        const val KEY_DYNAMIC_COLOR = "dynamic_color"
     }
 }

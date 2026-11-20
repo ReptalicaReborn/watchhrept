@@ -10,10 +10,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,7 +33,6 @@ import androidx.navigation.compose.rememberNavController
 private object Routes {
     const val HOME = "home"
     const val NEW_CHAT = "new_chat"
-    const val SEARCH = "search"
     const val CHAT = "chat"
     const val FORWARD = "forward"
     const val SETTINGS = "settings"
@@ -54,10 +53,14 @@ fun App(vm: AppViewModel) {
             if (!state.settings.isConfigured) {
                 SettingsScreen(
                     current = state.settings,
+                    appearance = state.appearance,
+                    profileName = null,
+                    profileId = null,
                     loggedIn = false,
                     canGoBack = false,
                     onBack = {},
                     onSave = vm::saveSettings,
+                    onAppearance = vm::setAppearance,
                     onRestartServer = vm::restartLocalServer,
                     onLogout = vm::logout,
                 )
@@ -105,31 +108,36 @@ private fun AppNav(vm: AppViewModel) {
                 )
                 else -> ThreadListScreen(
                     state = state,
-                    onOpen = { thread ->
-                        vm.openChat(thread)
-                        nav.navigate(Routes.CHAT)
-                    },
-                    onNewChat = { nav.navigate(Routes.NEW_CHAT) },
-                    onSearch = { nav.navigate(Routes.SEARCH) },
-                    onReconnect = vm::reconnectZalo,
-                    onSettings = { nav.navigate(Routes.SETTINGS) },
+                    actions = ThreadListActions(
+                        onOpen = { thread ->
+                            vm.openChat(thread)
+                            nav.navigate(Routes.CHAT)
+                        },
+                        onNewChat = { nav.navigate(Routes.NEW_CHAT) },
+                        onReconnect = vm::reconnectZalo,
+                        onSettings = { nav.navigate(Routes.SETTINGS) },
+                        onMarkAllRead = vm::markAllRead,
+                        onPin = { thread, pinned -> vm.setPinned(thread.ref, pinned) },
+                        onMute = { thread, option -> vm.setMuted(thread.ref, option) },
+                        onMarkRead = { vm.markThreadRead(it.ref) },
+                        onMarkUnread = { vm.markUnread(it.ref) },
+                        onDelete = { vm.deleteConversation(it.ref) },
+                    ),
                 )
             }
         }
-        for (destination in listOf(Routes.NEW_CHAT, Routes.SEARCH)) {
-            composable(destination) {
-                val state by vm.state.collectAsStateWithLifecycle()
-                ContactsScreen(
-                    title = if (destination == Routes.NEW_CHAT) "Search friends and groups" else "Search chats",
-                    threads = state.threads,
-                    onBack = { nav.popBackStack() },
-                    onPick = { thread ->
-                        vm.openChat(thread)
-                        nav.popBackStack()
-                        nav.navigate(Routes.CHAT)
-                    },
-                )
-            }
+        composable(Routes.NEW_CHAT) {
+            val state by vm.state.collectAsStateWithLifecycle()
+            ContactsScreen(
+                title = "New message",
+                threads = state.threads,
+                onBack = { nav.popBackStack() },
+                onPick = { thread ->
+                    vm.openChat(thread)
+                    nav.popBackStack()
+                    nav.navigate(Routes.CHAT)
+                },
+            )
         }
         composable(Routes.CHAT) { entry ->
             val state by vm.state.collectAsStateWithLifecycle()
@@ -161,13 +169,13 @@ private fun AppNav(vm: AppViewModel) {
                             vm.select(msg)
                             nav.navigate(Routes.FORWARD)
                         },
-                        onPin = { vm.setPinned(it) },
-                        onMute = { vm.setMuted(it) },
+                        onPin = { vm.setPinned(chat.ref, it) },
+                        onMute = { vm.setMuted(chat.ref, it) },
                         onMarkUnread = {
-                            vm.markUnread()
+                            vm.markUnread(chat.ref)
                             nav.popBackStack(Routes.HOME, inclusive = false)
                         },
-                        onDeleteConversation = { vm.deleteConversation() },
+                        onDeleteConversation = { vm.deleteConversation(chat.ref) },
                     ),
                 )
             }
@@ -176,7 +184,7 @@ private fun AppNav(vm: AppViewModel) {
             val state by vm.state.collectAsStateWithLifecycle()
             val msg = state.selected
             ContactsScreen(
-                title = "Forward to…",
+                title = "Forward to",
                 threads = state.threads,
                 onBack = { nav.popBackStack() },
                 onPick = { target ->
@@ -193,6 +201,9 @@ private fun AppNav(vm: AppViewModel) {
             val state by vm.state.collectAsStateWithLifecycle()
             SettingsScreen(
                 current = state.settings,
+                appearance = state.appearance,
+                profileName = state.status?.ownName,
+                profileId = state.status?.ownId,
                 loggedIn = state.status?.isLoggedIn == true,
                 canGoBack = true,
                 onBack = { nav.popBackStack() },
@@ -200,6 +211,7 @@ private fun AppNav(vm: AppViewModel) {
                     vm.saveSettings(it)
                     nav.popBackStack()
                 },
+                onAppearance = vm::setAppearance,
                 onRestartServer = {
                     vm.restartLocalServer()
                     nav.popBackStack()

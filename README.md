@@ -60,26 +60,30 @@ HOST=0.0.0.0 ACCESS_TOKEN=$(openssl rand -hex 24) npm start
 
 ## Android app
 
-`android/` is an Android phone app (Android 8.0+, Kotlin, Jetpack Compose with **Material 3**, Material You
-colors on Android 12+). By default it **runs the Zalo server on the phone itself** (the same code as above,
-bundled into the app with an embedded Node.js from [nodejs-mobile](https://github.com/nodejs-mobile/nodejs-mobile)),
-so no computer is needed. It can also connect to a server you run elsewhere (*Settings → Zalo runs on → A server*).
+`android/` is an Android phone app (Android 8.0+, Kotlin, Jetpack Compose with **Material 3**). It has a clean,
+Signal-style messenger look: plain white or dark backgrounds, blue bubbles for your messages, colored letter avatars.
+*Settings → Appearance* switches between light, dark and system theme, and (Android 12+) to your wallpaper's colors.
+By default it **runs the Zalo server on the phone itself** (the same code as above, bundled into the app with an
+embedded Node.js from [nodejs-mobile](https://github.com/nodejs-mobile/nodejs-mobile)), so no computer is needed. It
+can also connect to a server you run elsewhere (*Settings → Zalo runs on → A server*).
 
 It covers text chat (no mini apps, stickers, media or calls):
 
 | Feature | How in the app |
 |---|---|
-| Chat list | Pinned first, muted icon, unread badges, `@` when you're mentioned, live "typing…" |
-| New chat / search | **New chat** button or the search icon: any friend or group (diacritics optional: "duc" finds "Đức") |
-| Read & reply | Message bar at the bottom of a chat |
-| Reply to a message (quote) | Long-press a message → **Reply** |
-| Reactions | Long-press → ❤️ 👍 😆 😮 😭 😡 (tap yours again to remove) |
+| Chat list | Pinned section, muted icon, unread and `@` badges, check marks on your last message, live "typing…" |
+| Search | Search icon on the chat list: chats, contacts and groups (diacritics optional: "duc" finds "Đức") |
+| New chat | Pencil button → search any friend or group |
+| Read & reply | Message field at the bottom, with an emoji panel; the send button appears as you type |
+| Reply to a message (quote) | Swipe the message to the right, or long-press → **Reply** |
+| Reactions | Long-press → ❤️ 👍 😆 😮 😭 😡 above the menu (tap yours again to remove) |
 | Copy, forward | Long-press → **Copy text** / **Forward** → pick a chat |
 | Recall for everyone / delete for me | Long-press → confirm |
-| @mention in groups | Type `@` (or tap the `@` button) and pick a member; mention several people anywhere in the message |
-| Seen / delivered | Under your latest message ("Seen", "Seen by 3" in groups); others see your seen receipts too |
+| @mention in groups | Type `@` and pick a member; mention several people anywhere in the message |
+| Seen / delivered | Check marks in your bubbles: one circle sent, two delivered, two filled seen |
+| Unread | "N unread messages" divider when you open a chat; a button jumps back to the latest message |
 | Last online | Under the name in 1:1 chats |
-| Pin, mute (1 h, 4 h, until 8 AM, until turned on), mark unread, delete conversation | ⋮ menu in a chat |
+| Pin, mute (1 h, 4 h, until 8 AM, until turned on), mark read/unread, delete conversation | Long-press the chat in the list, or ⋮ in the chat |
 | Older messages | Scroll up |
 
 ### Install
