@@ -813,6 +813,13 @@ private fun Composer(
     val imeVisible by remember(ime, density) { derivedStateOf { ime.getBottom(density) > 0 } }
     // The keyboard and the emoji panel take turns.
     LaunchedEffect(imeVisible) { if (imeVisible) showEmoji = false }
+    // Starting a reply (swipe or menu) goes straight to typing it.
+    LaunchedEffect(replyTo?.id) {
+        if (replyTo != null && !showEmoji) {
+            runCatching { focus.requestFocus() }
+            keyboard?.show()
+        }
+    }
     BackHandler(enabled = showEmoji) { showEmoji = false }
 
     // The "@query" being typed right before the cursor, if any.
