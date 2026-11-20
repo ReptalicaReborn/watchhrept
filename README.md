@@ -103,8 +103,8 @@ The login is kept on the phone. If the phone is offline when the app (or the pho
 saved login and retries on its own, right away when a network comes back, instead of asking for a new QR code.
 
 Zalo stays connected in the background (a small "Connected to Zalo" notification shows this) and reconnects after a
-reboot, so 1:1 messages keep landing in the history while the app is closed. What it costs: each APK is about 42 MB,
-the app takes roughly 95 MB once installed (the Node.js runtime is ~50 MB unpacked) and on the order of 100 MB of
+reboot, so 1:1 messages keep landing in the history while the app is closed. What it costs: each APK is about 35 MB,
+the app takes roughly 90 MB once installed (the Node.js runtime is ~50 MB unpacked) and on the order of 100 MB of
 RAM. *Settings → Restart Zalo service* restarts it; *Log out of Zalo* removes the session from the phone.
 
 ### Using a server elsewhere instead
