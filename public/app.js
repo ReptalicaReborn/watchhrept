@@ -43,7 +43,7 @@ function renderStatus() {
     if (!loggedIn) {
         $("qr").hidden = !s.qrImage;
         if (s.qrImage) $("qr").src = s.qrImage;
-        $("login-btn").hidden = s.state !== "logged_out";
+        $("login-btn").hidden = s.state !== "logged_out" && !s.retrying;
         $("login-hint").textContent =
             s.state === "awaiting_qr_scan"
                 ? s.scannedBy

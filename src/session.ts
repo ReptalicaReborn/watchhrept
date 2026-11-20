@@ -19,6 +19,7 @@ import {
     type SendMessageQuote,
     type Typing,
     type Undo,
+    ZaloApiLoginQRAborted,
 } from "zca-js";
 import { HttpError } from "./errors.js";
 import {
@@ -45,6 +46,8 @@ export type SessionStatus = {
     ownId: string | null;
     ownName: string | null;
     error: string | null;
+    /** A saved session couldn't reach Zalo and will be retried; a QR login can replace it. */
+    retrying: boolean;
 };
 
 export type TypingEvent = { threadKind: ThreadKind; threadId: string; uid: string; name: string };
@@ -65,11 +68,18 @@ const GROUP_INFO_BATCH = 50;
 const MEMBER_INFO_BATCH = 100;
 const MEMBERS_CACHE_MS = 10 * 60_000;
 const SEEN_RECEIPT_LIMIT = 50;
+const RESUME_RETRY_MIN_MS = 5_000;
+const RESUME_RETRY_MAX_MS = 60_000;
+const SESSION_EXPIRED = "Your Zalo session has ended. Log in again with the QR code.";
 
 export class ZaloSession extends EventEmitter<SessionEvents> {
     private api: API | null = null;
     private loginInFlight: Promise<void> | null = null;
     private abortQR: (() => unknown) | null = null;
+    /** Bumped by logout and by a QR login that replaces a resume, so stale attempts drop their result. */
+    private generation = 0;
+    private resumeRetry: { timer: NodeJS.Timeout; wake: () => void } | null = null;
+    private resuming = false;
     private members = new Map<string, { at: number; list: GroupMember[] }>();
     private status: SessionStatus = {
         state: "logged_out",
@@ -78,6 +88,7 @@ export class ZaloSession extends EventEmitter<SessionEvents> {
         ownId: null,
         ownName: null,
         error: null,
+        retrying: false,
     };
 
     private readonly credentialsFile: string;
@@ -95,33 +106,103 @@ export class ZaloSession extends EventEmitter<SessionEvents> {
         return { ...this.status };
     }
 
-    /** Resume a saved session if there is one; otherwise stay logged out until a QR login is requested. */
+    /**
+     * Resume a saved session if there is one; otherwise stay logged out until a QR login is requested.
+     *
+     * A phone often starts the server before it has a network connection. Those failures
+     * don't mean the session is gone, so keep retrying instead of asking for a new QR scan.
+     */
     async resume(): Promise<void> {
         const credentials = this.readCredentials();
         if (!credentials) return;
-        await this.runLogin(async () => {
-            const api = await this.newZalo().login(credentials);
-            await this.onLoggedIn(api);
-        });
+        const generation = this.generation;
+        this.resuming = true;
+        try {
+            await this.resumeLoop(credentials, generation);
+        } finally {
+            if (generation === this.generation) this.resuming = false;
+            if (this.status.retrying) this.setStatus({ retrying: false });
+        }
+    }
+
+    private async resumeLoop(credentials: Credentials, generation: number): Promise<void> {
+        let delayMs = RESUME_RETRY_MIN_MS;
+        for (;;) {
+            let networkError: unknown = null;
+            await this.runLogin(async () => {
+                try {
+                    const api = await this.newZalo().login(credentials);
+                    await this.onLoggedIn(api, generation);
+                } catch (err) {
+                    if (!isTransientError(err)) throw new Error(SESSION_EXPIRED);
+                    networkError = err;
+                }
+            });
+            if (!networkError || generation !== this.generation) return;
+
+            this.setStatus({
+                state: "logging_in",
+                retrying: true,
+                error: `Can't reach Zalo (${describeError(networkError)}). Retrying in ${Math.round(delayMs / 1000)} s…`,
+            });
+            const woken = await this.waitForRetry(delayMs);
+            if (generation !== this.generation) return;
+            if (!woken) delayMs = Math.min(delayMs * 2, RESUME_RETRY_MAX_MS);
+        }
     }
 
     /** Start a QR login. The QR image is published through status updates. */
-    startQRLogin(): Promise<void> {
+    async startQRLogin(): Promise<void> {
+        if (this.status.state === "ready" || this.status.state === "disconnected") return;
+        // Replace a resume that is waiting to retry: the user chose to scan a new code instead.
+        if (this.resuming) {
+            this.cancelResume();
+            await this.loginInFlight?.catch(() => {});
+        }
+        const generation = this.generation;
         return this.runLogin(async () => {
-            const api = await this.newZalo().loginQR({}, (event) => this.onQREvent(event));
-            if (!api) throw new Error("QR login was cancelled");
-            await this.onLoggedIn(api);
+            let declined = false;
+            const api = await this.newZalo()
+                .loginQR({}, (event) => {
+                    if (generation !== this.generation) {
+                        if (event.actions && "abort" in event.actions) event.actions.abort();
+                        return;
+                    }
+                    if (event.type === LoginQRCallbackEventType.QRCodeDeclined) declined = true;
+                    this.onQREvent(event);
+                })
+                .catch((err: unknown) => {
+                    if (declined) throw new Error("Login was declined on the phone. Try again.");
+                    if (err instanceof ZaloApiLoginQRAborted) throw new Error("Login was cancelled.");
+                    throw err;
+                });
+            if (!api) throw new Error("Login was cancelled.");
+            await this.onLoggedIn(api, generation);
         });
     }
 
+    /** Retry a waiting resume now, e.g. when the device regains its network connection. */
+    retryNow(): void {
+        this.resumeRetry?.wake();
+    }
+
     async logout(): Promise<void> {
+        this.cancelResume();
         this.abortQR?.();
         this.api?.listener.stop();
         this.api = null;
         this.members.clear();
         fs.rmSync(this.credentialsFile, { force: true });
         this.store.clear();
-        this.setStatus({ state: "logged_out", qrImage: null, scannedBy: null, ownId: null, ownName: null, error: null });
+        this.setStatus({
+            state: "logged_out",
+            qrImage: null,
+            scannedBy: null,
+            ownId: null,
+            ownName: null,
+            error: null,
+            retrying: false,
+        });
     }
 
     /** Reconnect the real-time listener, e.g. after Zalo Web was opened elsewhere and kicked us. */
@@ -360,22 +441,42 @@ export class ZaloSession extends EventEmitter<SessionEvents> {
         if (this.loginInFlight) return this.loginInFlight;
         if (this.status.state === "ready") return Promise.resolve();
 
-        this.setStatus({ state: "logging_in", qrImage: null, scannedBy: null, error: null });
+        const generation = this.generation;
+        this.setStatus({ state: "logging_in", qrImage: null, scannedBy: null, error: null, retrying: false });
         this.loginInFlight = fn()
             .catch((err: unknown) => {
+                if (generation !== this.generation) return;
                 this.api = null;
-                this.setStatus({
-                    state: "logged_out",
-                    qrImage: null,
-                    scannedBy: null,
-                    error: err instanceof Error ? err.message : String(err),
-                });
+                this.setStatus({ state: "logged_out", qrImage: null, scannedBy: null, error: describeError(err) });
             })
             .finally(() => {
                 this.loginInFlight = null;
                 this.abortQR = null;
             });
         return this.loginInFlight;
+    }
+
+    /** Stops a resume that is in flight or waiting to retry; its result, if any, is dropped. */
+    private cancelResume(): void {
+        this.generation++;
+        this.resuming = false;
+        if (this.resumeRetry) {
+            clearTimeout(this.resumeRetry.timer);
+            this.resumeRetry.wake();
+        }
+    }
+
+    /** Resolves after `ms`, or early (with true) when retryNow() or cancelResume() is called. */
+    private waitForRetry(ms: number): Promise<boolean> {
+        return new Promise((resolve) => {
+            const done = (woken: boolean) => {
+                if (this.resumeRetry?.timer === timer) this.resumeRetry = null;
+                clearTimeout(timer);
+                resolve(woken);
+            };
+            const timer = setTimeout(() => done(false), ms);
+            this.resumeRetry = { timer, wake: () => done(true) };
+        });
     }
 
     private onQREvent(event: LoginQRCallbackEvent): void {
@@ -396,8 +497,8 @@ export class ZaloSession extends EventEmitter<SessionEvents> {
                 event.actions.retry();
                 break;
             case LoginQRCallbackEventType.QRCodeDeclined:
+                // startQRLogin turns the resulting rejection into a "declined" error.
                 event.actions.abort();
-                this.setStatus({ error: "Login was declined on the phone" });
                 break;
             case LoginQRCallbackEventType.GotLoginInfo:
                 this.writeCredentials({
@@ -410,7 +511,9 @@ export class ZaloSession extends EventEmitter<SessionEvents> {
         }
     }
 
-    private async onLoggedIn(api: API): Promise<void> {
+    private async onLoggedIn(api: API, generation: number): Promise<void> {
+        // Logged out (or replaced by a QR login) while this login was in flight.
+        if (generation !== this.generation) return;
         this.api = api;
         const ownId = api.getOwnId();
         this.store.ownId = ownId;
@@ -614,4 +717,33 @@ export function muteUntil(option: MuteOption, now = new Date()): number {
             return next.getTime();
         }
     }
+}
+
+const NETWORK_CODES = /^(E[A-Z]+|UND_ERR_[A-Z_]+)$/;
+
+/** Errors that mean "couldn't talk to Zalo right now" rather than "Zalo rejected the session". */
+export function isTransientError(err: unknown): boolean {
+    for (let e: unknown = err, depth = 0; e && depth < 5; e = (e as { cause?: unknown }).cause, depth++) {
+        const { message, code } = e as { message?: unknown; code?: unknown };
+        if (typeof code === "string" && NETWORK_CODES.test(code)) return true;
+        if (message === "fetch failed" || (typeof message === "string" && message.startsWith("Failed to fetch"))) {
+            return true;
+        }
+        if (e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError")) return true;
+    }
+    return false;
+}
+
+/** A short, human-readable reason; Node's "fetch failed" alone says nothing. */
+export function describeError(err: unknown): string {
+    if (!(err instanceof Error)) return String(err);
+    const cause = (err as { cause?: { code?: unknown; message?: unknown } }).cause;
+    if (err.message === "fetch failed") {
+        const code = typeof cause?.code === "string" ? cause.code : null;
+        if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "no internet connection";
+        if (code === "ECONNREFUSED" || code === "ECONNRESET") return "connection refused";
+        if (code?.includes("TIMEOUT") || code === "ETIMEDOUT") return "connection timed out";
+        return typeof cause?.message === "string" && cause.message ? cause.message : "network error";
+    }
+    return err.message;
 }
