@@ -18,7 +18,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run bundle
-      # The watch embeds Node 18.20.4 (nodejs-mobile): check the bundle starts there with no node_modules.
+      # The phone app embeds Node 18.20.4 (nodejs-mobile): check the bundle starts there with no node_modules.
       - uses: actions/setup-node@v4
         with:
           node-version: 18.20.4
@@ -33,11 +33,11 @@ jobs:
           curl -fsS -H "Authorization: Bearer t" localhost:3999/api/status
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:3999/api/status)" = 401
 
-  wear:
+  android:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: wear
+        working-directory: android
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,10 +54,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - uses: actions/cache@v4
         with:
-          path: wear/.nodejs-mobile
-          key: nodejs-mobile-${{ hashFiles('wear/app/build.gradle.kts') }}
+          path: android/.nodejs-mobile
+          key: nodejs-mobile-${{ hashFiles('android/app/build.gradle.kts') }}
       - run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
-      # A missing runtime or bundle would only show up as a crash on the watch.
+      # A missing runtime or bundle would only show up as a crash on the phone.
       - name: Check APKs contain Node.js and the server
         run: |
           for apk in app/build/outputs/apk/debug/*.apk; do
@@ -67,8 +67,8 @@ jobs:
               unzip -l "$apk" | grep -q "$f" || { echo "::error::$f missing from $apk"; exit 1; }
             done
           done
-      # One APK per CPU type: arm64-v8a, armeabi-v7a (most watches) and x86_64 (emulator).
+      # One APK per CPU type: arm64-v8a (most phones), armeabi-v7a (older phones) and x86_64 (emulator).
       - uses: actions/upload-artifact@v4
         with:
-          name: zalo-watch-debug-apk
-          path: wear/app/build/outputs/apk/debug/*.apk
+          name: zalo-lite-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk

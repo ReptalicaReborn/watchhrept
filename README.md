@@ -2,7 +2,7 @@
 
 A self-hosted, third-party client for a **personal Zalo account**. It is a small Node server built on
 [`zca-js`](https://github.com/RFS-ADRENO/zca-js), which logs in the same way Zalo Web does, plus a lightweight
-web UI that works on desktop, phone and small watch-sized screens.
+web UI, and an Android phone app (Material 3) that can run the whole thing on the phone itself.
 
 > [!WARNING]
 > This is **unofficial**. It is not affiliated with or endorsed by Zalo/VNG, and using it is against Zalo's
@@ -12,7 +12,7 @@ web UI that works on desktop, phone and small watch-sized screens.
 ## How it works
 
 ```
- browser / phone / watch ──HTTP + WebSocket──▶ watchhrept server ──zca-js──▶ Zalo Web endpoints
+ browser / Android app ──HTTP + WebSocket──▶ watchhrept server ──zca-js──▶ Zalo Web endpoints
 ```
 
 - **Login**: scan a QR code with the Zalo app on your phone, the same way you log in to chat.zalo.me.
@@ -50,7 +50,7 @@ For development: `npm run dev` (auto-reload), `npm test`, `npm run typecheck`.
 | `ACCESS_TOKEN` | *(none)* | Required for every API/WebSocket request when set. **Mandatory** if `HOST` is not loopback |
 | `READ_RECEIPTS` | `true` | Send "seen" receipts to Zalo when you read a chat, like the official app. `false` to read silently |
 
-To use it from your phone or watch, expose it with a token and open `http://<server>:3000/?token=<ACCESS_TOKEN>`
+To use it from another device, expose it with a token and open `http://<server>:3000/?token=<ACCESS_TOKEN>`
 once on each device (the token is remembered). Put it behind HTTPS (a reverse proxy, Tailscale, etc.) if it
 leaves your home network: anyone with the token can read and send messages as you.
 
@@ -58,59 +58,68 @@ leaves your home network: anyone with the token can read and send messages as yo
 HOST=0.0.0.0 ACCESS_TOKEN=$(openssl rand -hex 24) npm start
 ```
 
-## Wear OS app
+## Android app
 
-`wear/` is a standalone Wear OS 3+ app (Kotlin, Compose for Wear OS). By default it **runs the Zalo server on
-the watch itself** (the same code as above, bundled into the app with an embedded Node.js from
-[nodejs-mobile](https://github.com/nodejs-mobile/nodejs-mobile)), so no computer is needed. It can also connect to
-a server running elsewhere (*Settings → Zalo runs on → Another device*).
+`android/` is an Android phone app (Android 8.0+, Kotlin, Jetpack Compose with **Material 3**). It has a clean,
+Signal-style messenger look: plain white or dark backgrounds, blue bubbles for your messages, colored letter avatars.
+*Settings → Appearance* switches between light, dark and system theme, and (Android 12+) to your wallpaper's colors.
+By default it **runs the Zalo server on the phone itself** (the same code as above, bundled into the app with an
+embedded Node.js from [nodejs-mobile](https://github.com/nodejs-mobile/nodejs-mobile)), so no computer is needed. It
+can also connect to a server you run elsewhere (*Settings → Zalo runs on → A server*).
 
-It covers everything the official app does for text chat (no mini apps, stickers, media or calls):
+It covers text chat (no mini apps, stickers, media or calls):
 
-| Feature | How on the watch |
+| Feature | How in the app |
 |---|---|
-| Chat list | Pinned first (📌), muted (🔕), unread counts, `@` when you're mentioned, live "typing…" |
-| New chat | **New chat** → search any friend or group by voice or keyboard (diacritics optional: "duc" finds "Đức") |
-| Read & reply | Voice, keyboard, emoji, quick replies, or type on the paired phone |
-| Reply to a message (quote) | Tap a message → **Reply** |
-| Reactions | Tap a message → ❤️ 👍 😆 😮 😭 😡 (tap yours again to remove) |
-| Recall for everyone / delete for me | Tap a message → confirm with a second tap |
-| Forward | Tap a text message → **Forward** → pick a chat |
-| @mention in groups | **@ Mention someone** → pick a member → type |
-| Seen / delivered | Under your latest message ("Seen", "Seen by 3" in groups); others see your seen receipts too |
+| Chat list | Pinned section, muted icon, unread and `@` badges, check marks on your last message, live "typing…" |
+| Search | Search icon on the chat list: chats, contacts and groups (diacritics optional: "duc" finds "Đức") |
+| New chat | Pencil button → search any friend or group |
+| Read & reply | Message field at the bottom, with an emoji panel; the send button appears as you type |
+| Reply to a message (quote) | Swipe the message to the right, or long-press → **Reply** |
+| Reactions | Long-press → ❤️ 👍 😆 😮 😭 😡 above the menu (tap yours again to remove) |
+| Copy, forward | Long-press → **Copy text** / **Forward** → pick a chat |
+| Recall for everyone / delete for me | Long-press → confirm |
+| @mention in groups | Type `@` and pick a member; mention several people anywhere in the message |
+| Seen / delivered | Check marks in your bubbles: one circle sent, two delivered, two filled seen |
+| Unread | "N unread messages" divider when you open a chat; a button jumps back to the latest message |
 | Last online | Under the name in 1:1 chats |
-| Pin, mute (1 h, 4 h, until 8 AM, until turned on), mark unread, delete conversation | **Chat options** |
-| Older messages | **Load earlier** at the top of a chat |
-| Log in | If the server isn't logged in, the watch shows the Zalo QR code to scan with your phone |
+| Pin, mute (1 h, 4 h, until 8 AM, until turned on), mark read/unread, delete conversation | Long-press the chat in the list, or ⋮ in the chat |
+| Older messages | Scroll up |
 
-Pinned and muted chats come from your Zalo account, so they match the phone app.
+### Install
 
-### Install (Zalo on the watch)
+1. Download `zalo-lite-debug-apk` from the latest **CI** run on GitHub. It holds one APK per CPU type; almost every
+   current phone is `arm64-v8a` (check with `adb shell getprop ro.product.cpu.abi`).
+2. Copy `app-arm64-v8a-debug.apk` to the phone and open it (allow installing from that app when asked), or
+   `adb install app-arm64-v8a-debug.apk`.
+3. Open **Zalo Lite** and log in (below).
 
-1. Download `zalo-watch-debug-apk` from the latest **CI** run on GitHub. It holds one APK per CPU type; find
-   your watch's with `adb shell getprop ro.product.cpu.abi` (most watches: `armeabi-v7a` or `arm64-v8a`).
-2. Enable *Developer options → ADB debugging* and *Debug over Wi-Fi* on the watch, then
-   `adb connect <watch-ip>:5555 && adb install app-<abi>-debug.apk`.
-3. Open **Zalo Watch**. After "Starting Zalo…", tap **Log in with QR** and scan the code on the watch with the
-   Zalo app on your phone (QR-scanner icon next to the search bar), then confirm on the phone.
+### Logging in
 
-The login is kept on the watch. Zalo stays connected in the background (a small "Connected to Zalo" notification
-shows this) and reconnects after a reboot, so 1:1 messages keep landing in the history while the app is closed.
+Zalo logs in third-party clients like Zalo Web: with a QR code that you confirm in the official Zalo app.
 
-What it costs: each APK is about 42 MB and the app takes roughly 95 MB once installed (the Node.js runtime is
-~50 MB unpacked), it uses on the order of 100 MB of RAM, and noticeably more battery than an app that only runs
-while open. *Settings → Restart Zalo service* restarts it;
-*Log out of Zalo* removes the session from the watch.
+- **Zalo is on another phone:** tap **Get QR code** and scan it with that phone (Zalo → QR icon next to search).
+- **Zalo is on this same phone:** tap **Get QR code**, then **Save image**. In Zalo, open the QR scanner, tap the
+  picture button and pick the saved code. **Share** sends the image elsewhere (e.g. to a computer to scan from).
+- Confirm on the phone. Only one web session can listen at a time, so this disconnects Zalo Web elsewhere.
+
+The login is kept on the phone. If the phone is offline when the app (or the phone) starts, the app keeps the
+saved login and retries on its own, right away when a network comes back, instead of asking for a new QR code.
+
+Zalo stays connected in the background (a small "Connected to Zalo" notification shows this) and reconnects after a
+reboot, so 1:1 messages keep landing in the history while the app is closed. What it costs: each APK is about 35 MB,
+the app takes roughly 90 MB once installed (the Node.js runtime is ~50 MB unpacked) and on the order of 100 MB of
+RAM. *Settings → Restart Zalo service* restarts it; *Log out of Zalo* removes the session from the phone.
 
 ### Using a server elsewhere instead
 
-Run the server as described above (with `HOST=0.0.0.0` and an `ACCESS_TOKEN`), then on the watch choose
-*Settings → Zalo runs on → Another device* and enter its address and token (pick *type on phone* to paste the
-token). The Wear OS emulator reaches a server on your computer at `http://10.0.2.2:3000`.
+Run the server as described above (with `HOST=0.0.0.0` and an `ACCESS_TOKEN`), then in the app choose
+*Settings → Zalo runs on → A server* and enter its address and token. The Android emulator reaches a server on your
+computer at `http://10.0.2.2:3000`.
 
 ### Building the app
 
-`cd wear && ./gradlew assembleDebug` needs the Android SDK/NDK and Node.js with `npm ci` run at the repo root:
+`cd android && ./gradlew assembleDebug` needs the Android SDK/NDK and Node.js with `npm ci` run at the repo root:
 the build bundles `src/` with esbuild and downloads nodejs-mobile (checked against a pinned SHA-256).
 
 ## Security notes
@@ -118,7 +127,7 @@ the build bundles `src/` with esbuild and downloads nodejs-mobile (checked again
 - `data/credentials.json` is equivalent to your logged-in Zalo session. It is written with `0600` permissions
   and is git-ignored. Never commit or share it.
 - **Log out** in the UI deletes the saved session and the message cache.
-- On the watch, the session lives in the app's private storage, and the on-watch server listens only on
+- In the Android app, the session lives in the app's private storage, and the on-phone server listens only on
   `127.0.0.1` with a random token that only the app knows.
 
 ## API
@@ -128,7 +137,8 @@ All endpoints are under `/api` and accept `Authorization: Bearer <token>` (or `?
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/status` | Session state, QR image (data URL) while logging in |
-| `POST` | `/login` | Start a QR login |
+| `POST` | `/login` | Start a QR login (also replaces a saved session that is waiting to retry) |
+| `POST` | `/retry` | Retry a saved session that couldn't reach Zalo now, instead of waiting for the next attempt |
 | `POST` | `/logout` | Log out and delete saved data |
 | `POST` | `/reconnect` | Restart the real-time listener |
 | `GET` | `/threads` | Chats and contacts: pinned first, then most recent; unread counts, `pinned`, `mutedUntil` |
@@ -148,7 +158,7 @@ All endpoints are under `/api` and accept `Authorization: Bearer <token>` (or `?
 
 `GET /ws` is a WebSocket that pushes `status`, `message`, `message_updated` (reactions, recalls, receipts),
 `message_deleted`, `typing` and `threads` events.
-A native watch or phone app can use this API directly instead of the web UI.
+The Android app uses this API; other clients can too.
 
 ## Not yet supported
 

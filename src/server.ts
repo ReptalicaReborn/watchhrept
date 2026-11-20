@@ -37,6 +37,12 @@ export function createServer(config: Config, session: ZaloSession): http.Server 
         res.status(202).json(session.getStatus());
     });
 
+    /** Retry a saved session that couldn't reach Zalo, without waiting for the next attempt. */
+    api.post("/retry", (_req, res) => {
+        session.retryNow();
+        res.status(202).json(session.getStatus());
+    });
+
     api.post("/logout", wrap(async (_req, res) => {
         await session.logout();
         res.json(session.getStatus());
