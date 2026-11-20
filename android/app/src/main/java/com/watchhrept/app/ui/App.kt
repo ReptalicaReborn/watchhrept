@@ -96,6 +96,7 @@ private fun AppNav(vm: AppViewModel) {
             when {
                 status == null && connectionError != null -> ConnectionErrorScreen(
                     error = connectionError,
+                    onDevice = state.settings.onDevice,
                     onRetry = vm::startLiveUpdates,
                     onSettings = { nav.navigate(Routes.SETTINGS) },
                 )

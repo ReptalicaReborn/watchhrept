@@ -57,17 +57,18 @@ jobs:
           path: android/.nodejs-mobile
           key: nodejs-mobile-${{ hashFiles('android/app/build.gradle.kts') }}
       - run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
-      # A missing runtime or bundle would only show up as a crash on the phone.
-      - name: Check APKs contain Node.js and the server
+      # A missing runtime or bundle would only show up on the phone, as a Zalo service that never starts.
+      # libnode.so needs libc++_shared.so next to it.
+      - name: Check the APK contains Node.js, its C++ runtime and the server
         run: |
           for apk in app/build/outputs/apk/debug/*.apk; do
             echo "$apk: $(du -h "$apk" | cut -f1)"
-            unzip -l "$apk" | grep -E "libnode\.so|libnodebridge\.so|assets/server/server\.mjs"
-            for f in libnode.so libnodebridge.so assets/server/server.mjs; do
-              unzip -l "$apk" | grep -q "$f" || { echo "::error::$f missing from $apk"; exit 1; }
+            unzip -l "$apk" | grep -E "\.so$|assets/server/server\.mjs"
+            for f in lib/arm64-v8a/libnode.so lib/arm64-v8a/libnodebridge.so lib/arm64-v8a/libc++_shared.so assets/server/server.mjs; do
+              unzip -l "$apk" | grep -qF "$f" || { echo "::error::$f missing from $apk"; exit 1; }
             done
           done
-      # One APK per CPU type: arm64-v8a (most phones), armeabi-v7a (older phones) and x86_64 (emulator).
+      # One APK, for 64-bit ARM phones.
       - uses: actions/upload-artifact@v4
         with:
           name: zalo-lite-debug-apk

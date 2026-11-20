@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Palette
@@ -80,6 +81,7 @@ fun SettingsScreen(
     var showToken by rememberSaveable { mutableStateOf(false) }
     var confirmLogout by rememberSaveable { mutableStateOf(false) }
     var pickTheme by rememberSaveable { mutableStateOf(false) }
+    var showLog by rememberSaveable { mutableStateOf(false) }
     val edited = ServerSettings(onDevice, serverUrl.trim(), token.trim())
     val changed = edited != current
     val urlValid = onDevice || ApiClient.normalizeServerUrl(serverUrl) != null
@@ -218,6 +220,12 @@ fun SettingsScreen(
                     headlineContent = { Text("Restart Zalo service") },
                     supportingContent = { Text("If messages stop arriving") },
                 )
+                ListItem(
+                    modifier = Modifier.clickable { showLog = true },
+                    leadingContent = { Icon(Icons.Outlined.Description, null) },
+                    headlineContent = { Text("Service log") },
+                    supportingContent = { Text("What the Zalo service did, to copy when reporting a problem") },
+                )
             }
             if (loggedIn) {
                 ListItem(
@@ -230,6 +238,8 @@ fun SettingsScreen(
             Spacer(Modifier.height(24.dp))
         }
     }
+
+    if (showLog) ServerLogDialog(onDismiss = { showLog = false })
 
     if (pickTheme) {
         AlertDialog(

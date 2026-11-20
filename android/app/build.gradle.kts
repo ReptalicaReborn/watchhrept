@@ -24,12 +24,19 @@ android {
         applicationId = "com.watchhrept.app"
         minSdk = 26 // Android 8.0
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
+
+        // Phones only: 64-bit ARM. (libnode.so is ~50 MB per CPU type.)
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
 
         externalNativeBuild {
             cmake {
                 arguments += "-DNODE_MOBILE_DIR=${nodeMobileDir.get().asFile.absolutePath}"
+                // libnode.so links against libc++_shared.so; this makes the build package it in the APK.
+                arguments += "-DANDROID_STL=c++_shared"
             }
         }
     }
@@ -37,16 +44,6 @@ android {
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
-        }
-    }
-
-    // libnode.so is ~60 MB per CPU type, so build one APK per type instead of a universal one.
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
-            isUniversalApk = false
         }
     }
 

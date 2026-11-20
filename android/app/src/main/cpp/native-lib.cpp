@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -16,6 +17,9 @@ namespace {
 const char *kTag = "ZaloLiteNode";
 int stdoutPipe[2];
 int stderrPipe[2];
+// Also written to a file (path in $WATCHHREPT_LOG) that the app can show, since logcat needs a computer.
+FILE *logFile = nullptr;
+pthread_mutex_t logMutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct PipeArgs {
     int fd;
@@ -31,6 +35,13 @@ void *forwardToLogcat(void *raw) {
         if (buf[n - 1] == '\n') n--;
         buf[n] = '\0';
         __android_log_write(args->priority, kTag, buf);
+        if (logFile != nullptr) {
+            pthread_mutex_lock(&logMutex);
+            fputs(buf, logFile);
+            fputc('\n', logFile);
+            fflush(logFile);
+            pthread_mutex_unlock(&logMutex);
+        }
     }
     return nullptr;
 }
@@ -70,6 +81,9 @@ Java_com_watchhrept_app_server_NodeRuntime_startNode(JNIEnv *env, jobject /* thi
         cursor += args[i].size() + 1;
     }
     argv[argc] = nullptr;
+
+    const char *logPath = getenv("WATCHHREPT_LOG");
+    if (logPath != nullptr && logPath[0] != '\0') logFile = fopen(logPath, "a");
 
     setvbuf(stdout, nullptr, _IOLBF, 0);
     setvbuf(stderr, nullptr, _IONBF, 0);

@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.Process
 import android.system.Os
+import android.system.OsConstants
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.watchhrept.app.MainActivity
@@ -24,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.Date
 
 /**
  * Runs the Zalo server (the bundled src/ of this repo) in embedded Node.js.
@@ -77,7 +79,10 @@ class NodeService : Service() {
     }
 
     private fun runNode() {
+        val log = LocalServer.logFile(this)
         try {
+            LocalServer.writeStatus(this, "starting")
+            log.writeText(describeDevice())
             val script = File(filesDir, "server/server.mjs")
             script.parentFile?.mkdirs()
             // Always refresh: the bundle changes with every app update and is only ~2 MB.
@@ -90,14 +95,30 @@ class NodeService : Service() {
             Os.setenv("DATA_DIR", dataDir.absolutePath, true)
             Os.setenv("HOME", filesDir.absolutePath, true)
             Os.setenv("TMPDIR", cacheDir.absolutePath, true)
+            Os.setenv("WATCHHREPT_LOG", log.absolutePath, true)
 
+            // Loading libnode.so happens here, so a missing or incompatible library is caught below.
             val code = NodeRuntime.startNode(arrayOf("node", "--max-old-space-size=$HEAP_MB", script.absolutePath))
             Log.w(TAG, "Node exited with code $code")
+            runCatching { log.appendText("Node.js exited with code $code\n") }
+            LocalServer.writeStatus(this, "exited", "Node.js exited with code $code")
         } catch (e: Throwable) {
             Log.e(TAG, "Could not run the Zalo server", e)
+            runCatching { log.appendText("FAILED: ${Log.getStackTraceString(e)}\n") }
+            LocalServer.writeStatus(this, "failed", e.message ?: e.toString())
         }
         stopSelf()
         Process.killProcess(Process.myPid())
+    }
+
+    private fun describeDevice(): String {
+        val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull()
+        val pageSize = runCatching { Os.sysconf(OsConstants._SC_PAGESIZE) }.getOrDefault(-1L)
+        return buildString {
+            appendLine("Zalo service starting at ${Date()}")
+            appendLine("App ${version ?: "?"} on ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+            appendLine("CPU ABIs: ${Build.SUPPORTED_ABIS.joinToString()}; memory page size: $pageSize bytes")
+        }
     }
 
     private fun buildNotification(): Notification {

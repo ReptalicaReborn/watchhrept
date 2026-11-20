@@ -124,15 +124,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         liveJob = viewModelScope.launch {
             while (true) {
-                val booting = onDevice && System.currentTimeMillis() - localStartedAt < LOCAL_BOOT_GRACE_MS
+                var booting = onDevice && System.currentTimeMillis() - localStartedAt < LOCAL_BOOT_GRACE_MS
                 try {
                     refreshAll(api)
                     api.events().collect { onEvent(api, it) }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
+                    // The on-phone server says why it stopped; no point waiting out the start-up time.
+                    val failure = if (onDevice) LocalServer.failure(getApplication(), since = localStartedAt) else null
+                    if (failure != null) booting = false
                     // While the on-phone server boots, keep showing "starting" rather than an error.
-                    val error = if (booting) null else e.message ?: "Cannot reach server"
+                    val error = when {
+                        failure != null -> "The Zalo service stopped: $failure"
+                        booting -> null
+                        else -> e.message ?: "Cannot reach server"
+                    }
                     _state.update { it.copy(connectionError = error) }
                 }
                 delay(if (booting) LOCAL_BOOT_RETRY_MS else RECONNECT_DELAY_MS)

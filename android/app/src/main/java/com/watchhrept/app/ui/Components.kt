@@ -11,10 +11,14 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -36,7 +40,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -51,6 +57,10 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -60,6 +70,9 @@ import androidx.compose.ui.unit.sp
 import coil.compose.SubcomposeAsyncImage
 import com.watchhrept.app.data.ChatMessage
 import com.watchhrept.app.data.MuteOption
+import com.watchhrept.app.server.LocalServer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Round avatar: the Zalo picture when there is one, else the first letter on a tinted circle.
@@ -221,7 +234,8 @@ fun LoadingScreen(label: String? = null) {
 }
 
 @Composable
-fun ConnectionErrorScreen(error: String, onRetry: () -> Unit, onSettings: () -> Unit) {
+fun ConnectionErrorScreen(error: String, onDevice: Boolean, onRetry: () -> Unit, onSettings: () -> Unit) {
+    var showLog by rememberSaveable { mutableStateOf(false) }
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(32.dp),
         verticalArrangement = Arrangement.Center,
@@ -229,7 +243,10 @@ fun ConnectionErrorScreen(error: String, onRetry: () -> Unit, onSettings: () -> 
     ) {
         Icon(Icons.Outlined.CloudOff, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.error)
         Spacer(Modifier.height(16.dp))
-        Text("Can't reach the server", style = MaterialTheme.typography.titleLarge)
+        Text(
+            if (onDevice) "Zalo couldn't start" else "Can't reach the server",
+            style = MaterialTheme.typography.titleLarge,
+        )
         Spacer(Modifier.height(8.dp))
         Text(
             error,
@@ -242,7 +259,44 @@ fun ConnectionErrorScreen(error: String, onRetry: () -> Unit, onSettings: () -> 
             OutlinedButton(onClick = onSettings) { Text("Settings") }
             Button(onClick = onRetry) { Text("Try again") }
         }
+        if (onDevice) {
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = { showLog = true }) { Text("Show details") }
+        }
     }
+    if (showLog) ServerLogDialog(onDismiss = { showLog = false })
+}
+
+/** The on-phone service's log, to read or copy when something goes wrong. */
+@Composable
+fun ServerLogDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    var log by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        log = withContext(Dispatchers.IO) { LocalServer.readLog(context) }.ifBlank { "The service hasn't written anything yet." }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Zalo service log") },
+        text = {
+            SelectionContainer {
+                Text(
+                    log ?: "Loading…",
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                clipboard.setText(AnnotatedString(log.orEmpty()))
+                onDismiss()
+            }) { Text("Copy") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
 }
 
 @Composable

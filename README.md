@@ -88,11 +88,14 @@ It covers text chat (no mini apps, stickers, media or calls):
 
 ### Install
 
-1. Download `zalo-lite-debug-apk` from the latest **CI** run on GitHub. It holds one APK per CPU type; almost every
-   current phone is `arm64-v8a` (check with `adb shell getprop ro.product.cpu.abi`).
-2. Copy `app-arm64-v8a-debug.apk` to the phone and open it (allow installing from that app when asked), or
-   `adb install app-arm64-v8a-debug.apk`.
+1. Download `zalo-lite-debug-apk` from the latest **CI** run on GitHub. It holds `app-debug.apk`, built for 64-bit ARM
+   (`arm64-v8a`), which is what current phones use.
+2. Copy `app-debug.apk` to the phone and open it (allow installing from that app when asked), or
+   `adb install app-debug.apk`.
 3. Open **Zalo Lite** and log in (below).
+
+If it shows **Zalo couldn't start**, tap **Show details** (or *Settings → Service log*) and copy the log into an issue:
+it says which device and Android version it ran on and why the built-in Zalo service stopped.
 
 ### Logging in
 
